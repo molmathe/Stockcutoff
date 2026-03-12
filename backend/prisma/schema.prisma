@@ -1,0 +1,92 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  BRANCH_ADMIN
+  CASHIER
+}
+
+enum BillStatus {
+  OPEN
+  SUBMITTED
+  CANCELLED
+}
+
+model User {
+  id        String   @id @default(cuid())
+  username  String   @unique
+  password  String
+  name      String
+  role      Role     @default(CASHIER)
+  branchId  String?
+  branch    Branch?  @relation(fields: [branchId], references: [id])
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  bills     Bill[]
+}
+
+model Branch {
+  id        String   @id @default(cuid())
+  name      String
+  code      String   @unique
+  address   String?
+  phone     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  users     User[]
+  bills     Bill[]
+}
+
+model Item {
+  id           String     @id @default(cuid())
+  sku          String     @unique
+  barcode      String     @unique
+  name         String
+  description  String?
+  imageUrl     String?
+  defaultPrice Decimal    @db.Decimal(10, 2)
+  category     String?
+  active       Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  billItems    BillItem[]
+}
+
+model Bill {
+  id          String     @id @default(cuid())
+  billNumber  String     @unique
+  branchId    String
+  branch      Branch     @relation(fields: [branchId], references: [id])
+  userId      String
+  user        User       @relation(fields: [userId], references: [id])
+  status      BillStatus @default(OPEN)
+  subtotal    Decimal    @db.Decimal(10, 2) @default(0)
+  discount    Decimal    @db.Decimal(10, 2) @default(0)
+  total       Decimal    @db.Decimal(10, 2) @default(0)
+  notes       String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  submittedAt DateTime?
+  items       BillItem[]
+}
+
+model BillItem {
+  id       String  @id @default(cuid())
+  billId   String
+  bill     Bill    @relation(fields: [billId], references: [id], onDelete: Cascade)
+  itemId   String
+  item     Item    @relation(fields: [itemId], references: [id])
+  quantity Int     @default(1)
+  price    Decimal @db.Decimal(10, 2)
+  discount Decimal @db.Decimal(10, 2) @default(0)
+  subtotal Decimal @db.Decimal(10, 2)
+}
