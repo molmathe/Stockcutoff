@@ -4,40 +4,50 @@ import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
+const safeBranch = (b: any) => {
+  const { pincode, ...rest } = b;
+  return { ...rest, hasPincode: !!pincode };
+};
+
+// GET all branches
 router.get('/', authenticate, async (_req, res: Response) => {
   try {
     const branches = await prisma.branch.findMany({ orderBy: { name: 'asc' } });
-    // Never expose pincode to frontend list
-    res.json(branches.map(({ pincode: _p, ...b }) => b));
+    res.json(branches.map(safeBranch));
   } catch {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// GET single branch (admin only) — includes pincode masked
+// GET single branch
 router.get('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const branch = await prisma.branch.findUnique({ where: { id: req.params.id } });
     if (!branch) return res.status(404).json({ error: 'ไม่พบสาขา' });
-    // Return pincode presence but not value
-    res.json({ ...branch, hasPincode: !!branch.pincode, pincode: undefined });
+    res.json(safeBranch(branch));
   } catch {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
+// POST create
 router.post('/', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const { name, code, address, phone, pincode } = req.body;
+    const { name, code, address, phone, pincode, type, reportBranchId, bigsellerBranchId } = req.body;
     const data: any = { name, code, address, phone };
-    if (pincode && pincode.trim()) {
-      if (!/^\d{4,6}$/.test(pincode.trim())) {
+
+    if (type) data.type = type;
+    if (reportBranchId !== undefined) data.reportBranchId = reportBranchId || null;
+    if (bigsellerBranchId !== undefined) data.bigsellerBranchId = bigsellerBranchId || null;
+
+    if (pincode && String(pincode).trim()) {
+      if (!/^\d{4,6}$/.test(String(pincode).trim())) {
         return res.status(400).json({ error: 'PIN ต้องเป็นตัวเลข 4-6 หลัก' });
       }
-      data.pincode = pincode.trim();
+      data.pincode = String(pincode).trim();
     }
     const branch = await prisma.branch.create({ data });
-    res.status(201).json({ ...branch, pincode: undefined, hasPincode: !!branch.pincode });
+    res.status(201).json(safeBranch(branch));
   } catch (err: any) {
     if (err.code === 'P2002') {
       const field = err.meta?.target?.includes('pincode') ? 'รหัส PIN' : 'รหัสสาขา';
@@ -47,14 +57,19 @@ router.post('/', authenticate, requireAdmin, async (req: AuthRequest, res: Respo
   }
 });
 
+// PUT update
 router.put('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const { name, code, address, phone, active, pincode } = req.body;
+    const { name, code, address, phone, active, pincode, type, reportBranchId, bigsellerBranchId } = req.body;
     const data: any = { name, code, address, phone, active };
+
+    if (type !== undefined) data.type = type;
+    if (reportBranchId !== undefined) data.reportBranchId = reportBranchId || null;
+    if (bigsellerBranchId !== undefined) data.bigsellerBranchId = bigsellerBranchId || null;
 
     if (pincode !== undefined) {
       if (pincode === '' || pincode === null) {
-        data.pincode = null; // Remove pincode
+        data.pincode = null;
       } else if (/^\d{4,6}$/.test(String(pincode).trim())) {
         data.pincode = String(pincode).trim();
       } else {
@@ -62,11 +77,8 @@ router.put('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Res
       }
     }
 
-    const branch = await prisma.branch.update({
-      where: { id: req.params.id },
-      data,
-    });
-    res.json({ ...branch, pincode: undefined, hasPincode: !!branch.pincode });
+    const branch = await prisma.branch.update({ where: { id: req.params.id }, data });
+    res.json(safeBranch(branch));
   } catch (err: any) {
     if (err.code === 'P2002') {
       const field = err.meta?.target?.includes('pincode') ? 'รหัส PIN' : 'รหัสสาขา';
@@ -76,6 +88,7 @@ router.put('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Res
   }
 });
 
+// DELETE bulk
 router.delete('/bulk', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const { ids } = req.body;
@@ -86,9 +99,10 @@ router.delete('/bulk', authenticate, requireAdmin, async (req: AuthRequest, res:
   }
 });
 
-router.delete('/:id', authenticate, requireAdmin, async (_req, res: Response) => {
+// DELETE single
+router.delete('/:id', authenticate, requireAdmin, async (req, res: Response) => {
   try {
-    await prisma.branch.delete({ where: { id: _req.params.id } });
+    await prisma.branch.delete({ where: { id: req.params.id } });
     res.json({ message: 'ลบเรียบร้อย' });
   } catch {
     res.status(500).json({ error: 'Server error' });

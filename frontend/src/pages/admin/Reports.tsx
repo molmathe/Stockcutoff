@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
-import { BarChart3, Download, RefreshCw } from 'lucide-react';
+import { BarChart3, Download, RefreshCw, Database } from 'lucide-react';
 import client from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import type { Bill, Branch } from '../../types';
@@ -19,6 +19,7 @@ export default function Reports() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [exportingMaster, setExportingMaster] = useState(false);
 
   const today = format(new Date(), 'yyyy-MM-dd');
   const [filters, setFilters] = useState({ branchId: '', startDate: today, endDate: today });
@@ -74,6 +75,29 @@ export default function Reports() {
     }
   };
 
+  const handleExportMaster = async () => {
+    setExportingMaster(true);
+    try {
+      const res = await client.get('/reports/export-master', {
+        params: {
+          ...(filters.branchId && { branchId: filters.branchId }),
+          ...(filters.startDate && { startDate: filters.startDate }),
+          ...(filters.endDate && { endDate: filters.endDate }),
+        },
+        responseType: 'blob',
+      });
+      const url = URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ข้อมูลหลัก-${filters.startDate}-${filters.endDate}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('ดาวน์โหลดข้อมูลหลักเรียบร้อย');
+    } catch {
+      toast.error('ดาวน์โหลดข้อมูลหลักไม่สำเร็จ');
+    } finally { setExportingMaster(false); }
+  };
+
   const fmt = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2 });
 
   return (
@@ -112,6 +136,9 @@ export default function Reports() {
           </button>
           <button onClick={handleDownload} disabled={downloading || bills.length === 0} className="btn-success flex items-center gap-1">
             <Download size={15} /> {downloading ? 'กำลังดาวน์โหลด...' : 'ดาวน์โหลด Excel'}
+          </button>
+          <button onClick={handleExportMaster} disabled={exportingMaster} className="btn-secondary flex items-center gap-1">
+            <Database size={15} /> {exportingMaster ? 'กำลังส่งออก...' : 'ส่งออกข้อมูลหลัก'}
           </button>
         </div>
       </div>

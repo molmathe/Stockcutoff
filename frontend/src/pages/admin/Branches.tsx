@@ -3,9 +3,12 @@ import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, Building2, KeyRound } from 'lucide-react';
 import client from '../../api/client';
 import Modal from '../../components/Modal';
-import type { Branch } from '../../types';
+import type { Branch, BranchType } from '../../types';
 
-const EMPTY = { name: '', code: '', address: '', phone: '', pincode: '', active: true };
+const EMPTY = {
+  name: '', code: '', address: '', phone: '', pincode: '', active: true,
+  type: 'PERMANENT' as BranchType, reportBranchId: '', bigsellerBranchId: '',
+};
 
 export default function Branches() {
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -28,22 +31,30 @@ export default function Branches() {
   const openAdd = () => { setEditing(null); setForm(EMPTY); setShowModal(true); };
   const openEdit = (b: Branch) => {
     setEditing(b);
-    setForm({ name: b.name, code: b.code, address: b.address || '', phone: b.phone || '', pincode: '', active: b.active });
+    setForm({
+      name: b.name, code: b.code, address: b.address || '', phone: b.phone || '',
+      pincode: '', active: b.active, type: b.type || 'PERMANENT',
+      reportBranchId: b.reportBranchId || '', bigsellerBranchId: b.bigsellerBranchId || '',
+    });
     setShowModal(true);
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Validate pincode format
     if (form.pincode && !/^\d{4,6}$/.test(form.pincode)) {
       toast.error('รหัส PIN ต้องเป็นตัวเลข 4-6 หลักเท่านั้น');
       return;
     }
     setSaving(true);
     try {
-      const payload: any = { name: form.name, code: form.code, address: form.address, phone: form.phone, active: form.active };
+      const payload: any = {
+        name: form.name, code: form.code, address: form.address, phone: form.phone,
+        active: form.active, type: form.type,
+        reportBranchId: form.reportBranchId || null,
+        bigsellerBranchId: form.bigsellerBranchId || null,
+      };
       if (form.pincode) payload.pincode = form.pincode;
-      else if (editing) payload.pincode = ''; // clear pincode
+      else if (editing) payload.pincode = '';
 
       if (editing) { await client.put(`/branches/${editing.id}`, payload); toast.success('อัพเดทสาขาเรียบร้อย'); }
       else { await client.post('/branches', payload); toast.success('เพิ่มสาขาเรียบร้อย'); }
@@ -68,6 +79,11 @@ export default function Branches() {
 
   const toggleSelect = (id: string) => setSelected((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
   const toggleAll = () => setSelected(selected.length === branches.length ? [] : branches.map((b) => b.id));
+
+  const typeBadge = (type: BranchType) =>
+    type === 'PERMANENT'
+      ? <span className="inline-flex text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">ถาวร</span>
+      : <span className="inline-flex text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">ชั่วคราว</span>;
 
   return (
     <div className="space-y-4">
@@ -98,7 +114,8 @@ export default function Branches() {
                 </th>
                 <th className="table-header">รหัสสาขา</th>
                 <th className="table-header">ชื่อสาขา</th>
-                <th className="table-header">ที่อยู่</th>
+                <th className="table-header">ประเภท</th>
+                <th className="table-header">รหัสรายงาน / Bigseller</th>
                 <th className="table-header">เบอร์โทร</th>
                 <th className="table-header text-center">รหัส PIN</th>
                 <th className="table-header">สถานะ</th>
@@ -107,17 +124,25 @@ export default function Branches() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={8} className="p-8 text-center text-gray-400">กำลังโหลด...</td></tr>
+                <tr><td colSpan={9} className="p-8 text-center text-gray-400">กำลังโหลด...</td></tr>
               ) : branches.length === 0 ? (
-                <tr><td colSpan={8} className="p-8 text-center text-gray-400">ยังไม่มีสาขา</td></tr>
+                <tr><td colSpan={9} className="p-8 text-center text-gray-400">ยังไม่มีสาขา</td></tr>
               ) : branches.map((b) => (
                 <tr key={b.id} className="hover:bg-gray-50">
                   <td className="table-cell">
                     <input type="checkbox" checked={selected.includes(b.id)} onChange={() => toggleSelect(b.id)} className="rounded" />
                   </td>
                   <td className="table-cell font-mono font-semibold text-blue-700">{b.code}</td>
-                  <td className="table-cell font-medium">{b.name}</td>
-                  <td className="table-cell text-gray-500 text-sm">{b.address || '—'}</td>
+                  <td className="table-cell font-medium">
+                    <div>{b.name}</div>
+                    {b.address && <div className="text-xs text-gray-400 truncate max-w-[180px]">{b.address}</div>}
+                  </td>
+                  <td className="table-cell">{typeBadge(b.type)}</td>
+                  <td className="table-cell text-xs text-gray-500 space-y-0.5">
+                    {b.reportBranchId && <div><span className="text-gray-400">RPT:</span> {b.reportBranchId}</div>}
+                    {b.bigsellerBranchId && <div><span className="text-gray-400">BS:</span> {b.bigsellerBranchId}</div>}
+                    {!b.reportBranchId && !b.bigsellerBranchId && <span className="text-gray-300">—</span>}
+                  </td>
                   <td className="table-cell text-gray-500 text-sm">{b.phone || '—'}</td>
                   <td className="table-cell text-center">
                     {b.hasPincode ? (
@@ -150,14 +175,36 @@ export default function Branches() {
       {showModal && (
         <Modal title={editing ? 'แก้ไขสาขา' : 'เพิ่มสาขา'} onClose={() => setShowModal(false)}>
           <form onSubmit={handleSave} className="space-y-3">
-            <div>
-              <label className="label">ชื่อสาขา *</label>
-              <input required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="input" placeholder="เช่น สาขาสยาม" />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">ชื่อสาขา *</label>
+                <input required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="input" placeholder="เช่น สาขาสยาม" />
+              </div>
+              <div>
+                <label className="label">รหัสสาขา *</label>
+                <input required value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))} className="input font-mono" placeholder="เช่น HQ, BR01" />
+              </div>
             </div>
+
             <div>
-              <label className="label">รหัสสาขา *</label>
-              <input required value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))} className="input font-mono" placeholder="เช่น HQ, BR01" />
+              <label className="label">ประเภทสาขา</label>
+              <select value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value as BranchType }))} className="input">
+                <option value="PERMANENT">ถาวร (Permanent)</option>
+                <option value="TEMPORARY">ชั่วคราว (Temporary)</option>
+              </select>
             </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">รหัสสาขา (รายงาน)</label>
+                <input value={form.reportBranchId} onChange={(e) => setForm((f) => ({ ...f, reportBranchId: e.target.value }))} className="input font-mono" placeholder="รหัสในไฟล์รายงาน" />
+              </div>
+              <div>
+                <label className="label">รหัสสาขา (Bigseller)</label>
+                <input value={form.bigsellerBranchId} onChange={(e) => setForm((f) => ({ ...f, bigsellerBranchId: e.target.value }))} className="input font-mono" placeholder="รหัสใน Bigseller" />
+              </div>
+            </div>
+
             <div>
               <label className="label">ที่อยู่</label>
               <input value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} className="input" placeholder="ที่อยู่สาขา" />

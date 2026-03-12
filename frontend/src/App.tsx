@@ -14,6 +14,8 @@ const Branches = lazy(() => import('./pages/admin/Branches'));
 const Users = lazy(() => import('./pages/admin/Users'));
 const Reports = lazy(() => import('./pages/admin/Reports'));
 const Categories = lazy(() => import('./pages/admin/Categories'));
+const ReportTemplates = lazy(() => import('./pages/admin/ReportTemplates'));
+const ImportSales = lazy(() => import('./pages/admin/ImportSales'));
 
 const Loader = () => (
   <div className="flex h-full items-center justify-center text-gray-400 text-sm">กำลังโหลด...</div>
@@ -49,6 +51,8 @@ function AppRoutes() {
           <Route path="admin/users" element={<Guard roles={['SUPER_ADMIN', 'BRANCH_ADMIN']}><Users /></Guard>} />
           <Route path="admin/reports" element={<Guard roles={['SUPER_ADMIN', 'BRANCH_ADMIN']}><Reports /></Guard>} />
           <Route path="admin/categories" element={<Guard roles={['SUPER_ADMIN', 'BRANCH_ADMIN']}><Categories /></Guard>} />
+          <Route path="admin/report-templates" element={<Guard roles={['SUPER_ADMIN']}><ReportTemplates /></Guard>} />
+          <Route path="admin/import-sales" element={<Guard roles={['SUPER_ADMIN']}><ImportSales /></Guard>} />
         </Route>
       </Routes>
     </Suspense>

@@ -5,6 +5,8 @@ export interface Category {
   updatedAt: string;
 }
 
+export type BranchType = 'PERMANENT' | 'TEMPORARY';
+
 export interface Branch {
   id: string;
   name: string;
@@ -12,6 +14,9 @@ export interface Branch {
   address: string | null;
   phone: string | null;
   active: boolean;
+  type: BranchType;
+  reportBranchId: string | null;
+  bigsellerBranchId: string | null;
   hasPincode?: boolean;
   createdAt: string;
 }
@@ -60,6 +65,8 @@ export interface Bill {
   userId: string;
   user: { id: string; name: string };
   status: 'OPEN' | 'SUBMITTED' | 'CANCELLED';
+  source: 'POS' | 'IMPORT';
+  saleDate: string | null;
   subtotal: string;
   discount: string;
   total: string;
@@ -77,4 +84,50 @@ export interface TodaySummary {
   openRevenue: number;
   totalItems: number;
   bills: Bill[];
+}
+
+export interface ReportTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  columnDate: string | null;
+  columnBarcode: string | null;
+  columnSku: string | null;
+  columnPrice: string;
+  columnQty: string;
+  columnBranchId: string | null;
+  columnBranchName: string | null;
+  branchMatchBy: string;
+  itemMatchBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ImportPreviewRow {
+  rowNum: number;
+  rawDate: string;
+  saleDate: string | null;
+  rawBranch: string;
+  branchId: string | null;
+  branchName: string;
+  rawItem: string;
+  itemId: string | null;
+  itemName: string;
+  itemSku: string;
+  itemBarcode: string;
+  qty: number;
+  price: number;
+  status: 'matched' | 'no_branch' | 'no_item' | 'invalid';
+  errors: string[];
+}
+
+export interface ImportPreview {
+  rows: ImportPreviewRow[];
+  stats: {
+    total: number;
+    matched: number;
+    unmatched: number;
+    totalQty: number;
+    totalRevenue: number;
+  };
 }
