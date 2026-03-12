@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { Plus, Pencil, Trash2, Upload, Download, Search, Package, Images, X } from 'lucide-react';
+import { Plus, Pencil, Trash2, Upload, Download, Search, Package, Images, X, FileDown } from 'lucide-react';
 import client from '../../api/client';
 import Modal from '../../components/Modal';
 import type { Item, Category } from '../../types';
@@ -17,6 +17,30 @@ const numericKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
   ) {
     e.preventDefault();
   }
+};
+
+const CSV_HEADERS = ['sku', 'barcode', 'name', 'description', 'defaultPrice', 'category', 'active'];
+
+const escapeCell = (v: unknown) => {
+  const s = v === null || v === undefined ? '' : String(v);
+  return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
+const exportCsv = (rows: Item[], filename: string) => {
+  if (rows.length === 0) { return; }
+  const lines = [
+    CSV_HEADERS.join(','),
+    ...rows.map((r) =>
+      [r.sku, r.barcode, r.name, r.description ?? '', r.defaultPrice, r.category ?? '', r.active]
+        .map(escapeCell).join(',')
+    ),
+  ];
+  const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
 };
 
 export default function Items() {
@@ -228,10 +252,25 @@ export default function Items() {
         </div>
         <div className="flex gap-2 flex-wrap">
           {selected.length > 0 && (
-            <button onClick={handleBulkDelete} className="btn-danger flex items-center gap-1">
-              <Trash2 size={16} /> ลบ ({selected.length})
-            </button>
+            <>
+              <button
+                onClick={() => exportCsv(items.filter((i) => selected.includes(i.id)), `สินค้า-เลือก-${selected.length}-รายการ.csv`)}
+                className="btn-secondary flex items-center gap-1"
+              >
+                <FileDown size={16} /> ส่งออก ({selected.length})
+              </button>
+              <button onClick={handleBulkDelete} className="btn-danger flex items-center gap-1">
+                <Trash2 size={16} /> ลบ ({selected.length})
+              </button>
+            </>
           )}
+          <button
+            onClick={() => exportCsv(items, `สินค้า-ทั้งหมด-${new Date().toISOString().slice(0,10)}.csv`)}
+            disabled={items.length === 0}
+            className="btn-secondary flex items-center gap-1"
+          >
+            <Download size={16} /> ส่งออก CSV
+          </button>
           <button onClick={() => { setBulkImages([]); setBulkResult(null); setShowBulkImage(true); }}
             className="btn-secondary flex items-center gap-1">
             <Images size={16} /> อัพโหลดรูปภาพ
@@ -318,6 +357,13 @@ export default function Items() {
                   </td>
                   <td className="table-cell text-right">
                     <div className="flex gap-2 justify-end">
+                      <button
+                        onClick={() => exportCsv([item], `${item.sku}-${item.barcode}.csv`)}
+                        title="ส่งออก CSV"
+                        className="text-gray-400 hover:text-green-600"
+                      >
+                        <FileDown size={16} />
+                      </button>
                       <button onClick={() => openEdit(item)} className="text-blue-500 hover:text-blue-700"><Pencil size={16} /></button>
                       <button onClick={() => handleDelete(item.id)} className="text-red-400 hover:text-red-600"><Trash2 size={16} /></button>
                     </div>
