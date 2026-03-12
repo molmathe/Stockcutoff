@@ -5,11 +5,14 @@ export interface AuthRequest extends Request {
   user?: { id: string; role: string; branchId?: string | null };
 }
 
+// JWT_SECRET is validated at startup in index.ts — safe to use non-null assertion here
+const getSecret = (): string => process.env.JWT_SECRET!;
+
 export const authenticate = (req: AuthRequest, res: Response, next: NextFunction) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    req.user = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any;
+    req.user = jwt.verify(token, getSecret()) as any;
     next();
   } catch {
     return res.status(401).json({ error: 'Invalid token' });
@@ -29,3 +32,5 @@ export const requireSuperAdmin = (req: AuthRequest, res: Response, next: NextFun
   }
   next();
 };
+
+export { getSecret };

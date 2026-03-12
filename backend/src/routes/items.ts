@@ -53,9 +53,16 @@ router.get('/categories', authenticate, async (_req, res: Response) => {
 router.post('/', authenticate, requireAdmin, upload.single('image'), async (req: AuthRequest, res: Response) => {
   try {
     const { sku, barcode, name, description, defaultPrice, category } = req.body;
+    if (!sku || !barcode || !name || defaultPrice === undefined) {
+      return res.status(400).json({ error: 'กรุณากรอก SKU, บาร์โค้ด, ชื่อสินค้า และราคา' });
+    }
+    const price = parseFloat(defaultPrice);
+    if (isNaN(price) || price < 0) {
+      return res.status(400).json({ error: 'ราคาไม่ถูกต้อง' });
+    }
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
     const item = await prisma.item.create({
-      data: { sku, barcode, name, description, defaultPrice: parseFloat(defaultPrice), category: category || null, imageUrl },
+      data: { sku, barcode, name, description, defaultPrice: price, category: category || null, imageUrl },
     });
     res.status(201).json(item);
   } catch (err: any) {
@@ -68,6 +75,9 @@ router.post('/', authenticate, requireAdmin, upload.single('image'), async (req:
 router.delete('/bulk', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'กรุณาระบุรายการที่ต้องการลบ' });
+    }
     await prisma.item.deleteMany({ where: { id: { in: ids } } });
     res.json({ message: `ลบ ${ids.length} สินค้า` });
   } catch {
@@ -79,15 +89,27 @@ router.delete('/bulk', authenticate, requireAdmin, async (req: AuthRequest, res:
 router.post('/bulk-import', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const { items } = req.body as { items: any[] };
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'ไม่มีข้อมูลสินค้า' });
+    }
     let created = 0, updated = 0;
     const errors: string[] = [];
     for (const it of items) {
+      if (!it.sku || !it.barcode || !it.name) {
+        errors.push(`แถวไม่สมบูรณ์: ${JSON.stringify(it)}`);
+        continue;
+      }
+      const price = parseFloat(it.defaultPrice);
+      if (isNaN(price) || price < 0) {
+        errors.push(`SKU ${it.sku}: ราคาไม่ถูกต้อง`);
+        continue;
+      }
       try {
         const existing = await prisma.item.findUnique({ where: { sku: it.sku } });
         await prisma.item.upsert({
           where: { sku: it.sku },
-          update: { barcode: it.barcode, name: it.name, description: it.description || null, defaultPrice: parseFloat(it.defaultPrice), category: it.category || null },
-          create: { sku: it.sku, barcode: it.barcode, name: it.name, description: it.description || null, defaultPrice: parseFloat(it.defaultPrice), category: it.category || null },
+          update: { barcode: it.barcode, name: it.name, description: it.description || null, defaultPrice: price, category: it.category || null },
+          create: { sku: it.sku, barcode: it.barcode, name: it.name, description: it.description || null, defaultPrice: price, category: it.category || null },
         });
         if (existing) updated++; else created++;
       } catch (e: any) {
@@ -114,7 +136,6 @@ router.post('/bulk-images', authenticate, requireAdmin, upload.array('images', 1
       const item = await prisma.item.findUnique({ where: { barcode } });
 
       if (item) {
-        // Delete old image
         if (item.imageUrl) {
           const oldPath = path.join(__dirname, '../../uploads', path.basename(item.imageUrl));
           if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
@@ -123,7 +144,6 @@ router.post('/bulk-images', authenticate, requireAdmin, upload.array('images', 1
         await prisma.item.update({ where: { id: item.id }, data: { imageUrl } });
         matched.push({ barcode, name: item.name, imageUrl });
       } else {
-        // Remove unmatched uploaded file
         if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
         unmatched.push(file.originalname);
       }
@@ -151,11 +171,16 @@ router.put('/:id', authenticate, requireAdmin, upload.single('image'), async (re
     }
 
     const { sku, barcode, name, description, defaultPrice, category, active } = req.body;
+    const price = parseFloat(defaultPrice);
+    if (isNaN(price) || price < 0) {
+      return res.status(400).json({ error: 'ราคาไม่ถูกต้อง' });
+    }
+
     const item = await prisma.item.update({
       where: { id: req.params.id },
       data: {
         sku, barcode, name, description,
-        defaultPrice: parseFloat(defaultPrice),
+        defaultPrice: price,
         category: category || null,
         imageUrl,
         active: active !== undefined ? (active === 'true' || active === true) : undefined,

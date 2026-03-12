@@ -11,11 +11,14 @@ const generateBillNumber = () => {
   return `B${date}-${uuidv4().split('-')[0].toUpperCase()}`;
 };
 
+// Thai time (UTC+7) day boundaries — avoids server-timezone drift
 const getTodayRange = () => {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  const now = new Date();
+  const THAI_OFFSET_MS = 7 * 60 * 60 * 1000;
+  const thaiNow = new Date(now.getTime() + THAI_OFFSET_MS);
+  const thaiDateStr = thaiNow.toISOString().split('T')[0];
+  const today = new Date(`${thaiDateStr}T00:00:00+07:00`);
+  const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
   return { today, tomorrow };
 };
 
@@ -53,6 +56,7 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
         items: { include: { item: { select: { id: true, name: true, sku: true, barcode: true, imageUrl: true } } } },
       },
       orderBy: { createdAt: 'desc' },
+      take: 500, // safety cap to prevent OOM on large datasets
     });
     res.json(bills);
   } catch {
@@ -70,7 +74,6 @@ router.get('/today-summary', authenticate, async (req: AuthRequest, res: Respons
       createdAt: { gte: today, lt: tomorrow },
     };
 
-    // Scope by branch
     const effectiveBranchId = (branchId as string) || req.user!.branchId;
     if (effectiveBranchId) where.branchId = effectiveBranchId;
     if (req.user!.role === 'CASHIER') where.userId = req.user!.id;
@@ -98,7 +101,7 @@ router.get('/today-summary', authenticate, async (req: AuthRequest, res: Respons
       totalRevenue,
       openRevenue,
       totalItems,
-      bills, // include recent bills list for editing
+      bills,
     });
   } catch {
     res.status(500).json({ error: 'Server error' });
@@ -110,20 +113,31 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { branchId, items, notes, discount = 0 } = req.body;
 
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'กรุณาเพิ่มสินค้าอย่างน้อย 1 รายการ' });
+    }
+    const targetBranch = branchId || req.user!.branchId;
+    if (!targetBranch) {
+      return res.status(400).json({ error: 'กรุณาระบุสาขา' });
+    }
+
     let subtotal = 0;
     const billItems = (items as any[]).map((it) => {
-      const sub = it.price * it.quantity - (it.discount || 0);
+      const qty = Number(it.quantity) || 0;
+      const price = Number(it.price) || 0;
+      const itemDiscount = Number(it.discount) || 0;
+      const sub = price * qty - itemDiscount;
       subtotal += sub;
-      return { itemId: it.itemId, quantity: it.quantity, price: it.price, discount: it.discount || 0, subtotal: sub };
+      return { itemId: it.itemId, quantity: qty, price, discount: itemDiscount, subtotal: sub };
     });
 
-    const totalDiscount = Number(discount);
-    const total = subtotal - totalDiscount;
+    const totalDiscount = Math.max(0, Number(discount));
+    const total = Math.max(0, subtotal - totalDiscount);
 
     const bill = await prisma.bill.create({
       data: {
         billNumber: generateBillNumber(),
-        branchId: branchId || req.user!.branchId!,
+        branchId: targetBranch,
         userId: req.user!.id,
         subtotal,
         discount: totalDiscount,
@@ -143,45 +157,57 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
   }
 });
 
-// PUT /bills/:id — edit an OPEN bill (today only)
+// PUT /bills/:id — edit an OPEN bill
 router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const bill = await prisma.bill.findUnique({ where: { id: req.params.id } });
     if (!bill) return res.status(404).json({ error: 'ไม่พบบิล' });
     if (bill.status !== 'OPEN') return res.status(400).json({ error: 'แก้ไขได้เฉพาะบิลที่ยังเปิดอยู่เท่านั้น' });
 
-    // Only owner, branch admin, or super admin can edit
+    // Ownership / scope checks
     if (req.user!.role === 'CASHIER' && bill.userId !== req.user!.id) {
       return res.status(403).json({ error: 'ไม่มีสิทธิ์แก้ไขบิลนี้' });
+    }
+    if (req.user!.role === 'BRANCH_ADMIN' && bill.branchId !== req.user!.branchId) {
+      return res.status(403).json({ error: 'ไม่มีสิทธิ์แก้ไขบิลสาขาอื่น' });
     }
 
     const { items, notes, discount = 0 } = req.body;
 
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'กรุณาเพิ่มสินค้าอย่างน้อย 1 รายการ' });
+    }
+
     let subtotal = 0;
     const billItems = (items as any[]).map((it) => {
-      const sub = it.price * it.quantity - (it.discount || 0);
+      const qty = Number(it.quantity) || 0;
+      const price = Number(it.price) || 0;
+      const itemDiscount = Number(it.discount) || 0;
+      const sub = price * qty - itemDiscount;
       subtotal += sub;
-      return { itemId: it.itemId, quantity: it.quantity, price: it.price, discount: it.discount || 0, subtotal: sub };
+      return { itemId: it.itemId, quantity: qty, price, discount: itemDiscount, subtotal: sub };
     });
-    const totalDiscount = Number(discount);
-    const total = subtotal - totalDiscount;
+    const totalDiscount = Math.max(0, Number(discount));
+    const total = Math.max(0, subtotal - totalDiscount);
 
-    // Delete old items and recreate
-    await prisma.billItem.deleteMany({ where: { billId: bill.id } });
-    const updated = await prisma.bill.update({
-      where: { id: req.params.id },
-      data: {
-        subtotal,
-        discount: totalDiscount,
-        total,
-        notes,
-        items: { create: billItems },
-      },
-      include: {
-        branch: { select: { id: true, name: true, code: true } },
-        user: { select: { id: true, name: true } },
-        items: { include: { item: { select: { id: true, name: true, sku: true, barcode: true, imageUrl: true } } } },
-      },
+    // Atomic: delete old items and recreate within one transaction to prevent data loss
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.billItem.deleteMany({ where: { billId: bill.id } });
+      return tx.bill.update({
+        where: { id: req.params.id },
+        data: {
+          subtotal,
+          discount: totalDiscount,
+          total,
+          notes,
+          items: { create: billItems },
+        },
+        include: {
+          branch: { select: { id: true, name: true, code: true } },
+          user: { select: { id: true, name: true } },
+          items: { include: { item: { select: { id: true, name: true, sku: true, barcode: true, imageUrl: true } } } },
+        },
+      });
     });
     res.json(updated);
   } catch {
@@ -193,15 +219,26 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
 router.post('/submit-day', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { branchId } = req.body;
-    const targetBranch = branchId || req.user!.branchId;
     const { today, tomorrow } = getTodayRange();
 
     const where: any = {
       status: 'OPEN',
       createdAt: { gte: today, lt: tomorrow },
     };
-    if (targetBranch) where.branchId = targetBranch;
-    if (req.user!.role === 'CASHIER') where.userId = req.user!.id;
+
+    if (req.user!.role === 'CASHIER') {
+      // Cashier: only their own bills
+      where.userId = req.user!.id;
+    } else if (req.user!.role === 'BRANCH_ADMIN') {
+      // Branch admin: always scoped to their own branch
+      where.branchId = req.user!.branchId;
+    } else {
+      // SUPER_ADMIN: must explicitly provide branchId — prevents closing ALL branches at once
+      if (!branchId) {
+        return res.status(400).json({ error: 'กรุณาระบุสาขาที่ต้องการปิดวัน' });
+      }
+      where.branchId = branchId;
+    }
 
     const result = await prisma.bill.updateMany({
       where,
@@ -219,6 +256,15 @@ router.put('/:id/cancel', authenticate, async (req: AuthRequest, res: Response) 
     const bill = await prisma.bill.findUnique({ where: { id: req.params.id } });
     if (!bill) return res.status(404).json({ error: 'ไม่พบบิล' });
     if (bill.status !== 'OPEN') return res.status(400).json({ error: 'ยกเลิกได้เฉพาะบิลที่ยังเปิดอยู่' });
+
+    // Ownership / scope checks
+    if (req.user!.role === 'CASHIER' && bill.userId !== req.user!.id) {
+      return res.status(403).json({ error: 'ไม่มีสิทธิ์ยกเลิกบิลนี้' });
+    }
+    if (req.user!.role === 'BRANCH_ADMIN' && bill.branchId !== req.user!.branchId) {
+      return res.status(403).json({ error: 'ไม่มีสิทธิ์ยกเลิกบิลสาขาอื่น' });
+    }
+
     const updated = await prisma.bill.update({ where: { id: req.params.id }, data: { status: 'CANCELLED' } });
     res.json(updated);
   } catch {
