@@ -28,8 +28,11 @@ router.get('/', authenticate, requireAdmin, async (req: AuthRequest, res: Respon
 router.post('/', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const { username, password, name, role, branchId } = req.body;
+    if (!username || !password || !name) {
+      return res.status(400).json({ error: 'กรุณากรอกข้อมูลให้ครบ (username, password, name)' });
+    }
     if (req.user!.role === 'BRANCH_ADMIN' && role !== 'CASHIER') {
-      return res.status(403).json({ error: 'Branch admin can only create cashier accounts' });
+      return res.status(403).json({ error: 'Branch admin สามารถสร้างได้เฉพาะ CASHIER เท่านั้น' });
     }
     const user = await prisma.user.create({
       data: {
@@ -50,13 +53,33 @@ router.post('/', authenticate, requireAdmin, async (req: AuthRequest, res: Respo
 
 router.put('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
+    // Load target user to enforce scope and privilege checks
+    const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!target) return res.status(404).json({ error: 'ไม่พบผู้ใช้' });
+
+    if (req.user!.role === 'BRANCH_ADMIN') {
+      // Branch admin: can only manage cashiers in their own branch
+      if (target.branchId !== req.user!.branchId) {
+        return res.status(403).json({ error: 'ไม่มีสิทธิ์แก้ไขผู้ใช้สาขาอื่น' });
+      }
+      if (target.role !== 'CASHIER') {
+        return res.status(403).json({ error: 'ไม่มีสิทธิ์แก้ไขผู้ดูแลระบบ' });
+      }
+    }
+
     const { name, role, branchId, active, password } = req.body;
     const data: any = { name, active };
+
     if (req.user!.role === 'SUPER_ADMIN') {
       data.role = role;
       data.branchId = branchId || null;
     }
-    if (password) data.password = await bcrypt.hash(password, 10);
+
+    // Password change: only allowed by SUPER_ADMIN, or BRANCH_ADMIN updating own-branch cashier
+    if (password) {
+      data.password = await bcrypt.hash(password, 10);
+    }
+
     const user = await prisma.user.update({ where: { id: req.params.id }, data, include: { branch: true } });
     res.json(safeUser(user));
   } catch {
@@ -67,6 +90,9 @@ router.put('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Res
 router.delete('/:id', authenticate, requireSuperAdmin, async (req: AuthRequest, res: Response) => {
   try {
     if (req.params.id === req.user!.id) return res.status(400).json({ error: 'Cannot delete yourself' });
+    const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!target) return res.status(404).json({ error: 'ไม่พบผู้ใช้' });
+    if (target.isSystem) return res.status(400).json({ error: 'ไม่สามารถลบ system user ได้' });
     await prisma.user.delete({ where: { id: req.params.id } });
     res.json({ message: 'Deleted' });
   } catch {

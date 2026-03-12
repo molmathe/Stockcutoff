@@ -8,7 +8,20 @@ import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
 const router = Router();
 const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
+const MAX_IMPORT_ROWS = 10_000; // safety cap to prevent DoS via huge Excel files
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+// Thai time (UTC+7) day boundaries
+const getThaiDayRange = () => {
+  const now = new Date();
+  const THAI_OFFSET_MS = 7 * 60 * 60 * 1000;
+  const thaiNow = new Date(now.getTime() + THAI_OFFSET_MS);
+  const thaiDateStr = thaiNow.toISOString().split('T')[0];
+  const today = new Date(`${thaiDateStr}T00:00:00+07:00`);
+  const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+  return { today, tomorrow };
+};
 
 const buildWhere = (req: AuthRequest, query: any) => {
   const { branchId, startDate, endDate } = query;
@@ -49,16 +62,13 @@ function parseExcelDate(value: any): Date | null {
   if (!value) return null;
   if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
   if (typeof value === 'number') {
-    // Excel serial date (days since 1900-01-01, with leap year bug)
     const ms = Math.round((value - 25569) * 86400 * 1000);
     const d = new Date(ms);
     return isNaN(d.getTime()) ? null : d;
   }
   if (typeof value === 'string' && value.trim()) {
-    // Try ISO / standard parse
     let d = new Date(value.trim());
     if (!isNaN(d.getTime())) return d;
-    // DD/MM/YYYY or DD-MM-YYYY
     const m = value.trim().match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
     if (m) {
       const year = parseInt(m[3]) < 100 ? 2000 + parseInt(m[3]) : parseInt(m[3]);
@@ -66,7 +76,6 @@ function parseExcelDate(value: any): Date | null {
       if (!isNaN(d.getTime())) return d;
     }
   }
-  // ExcelJS rich-text object
   if (value && typeof value === 'object' && value.richText) {
     return parseExcelDate(value.richText.map((r: any) => r.text).join(''));
   }
@@ -91,35 +100,40 @@ function generateImportBillNumber(date: Date): string {
 router.get('/dashboard', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const bw = branchFilter(req);
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+    const { today, tomorrow } = getThaiDayRange();
+    const sevenDaysAgo = new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000);
 
-    const todayBills = await prisma.bill.findMany({
-      where: { ...bw, status: 'SUBMITTED', createdAt: { gte: today, lt: tomorrow } },
-      include: { items: true },
-    });
+    const [todayBills, recentBills, allBillsForItems] = await Promise.all([
+      prisma.bill.findMany({
+        where: { ...bw, status: 'SUBMITTED', createdAt: { gte: today, lt: tomorrow } },
+        include: { items: true },
+      }),
+      prisma.bill.findMany({
+        where: { ...bw, status: 'SUBMITTED', createdAt: { gte: sevenDaysAgo } },
+      }),
+      prisma.bill.findMany({
+        where: { ...bw, status: 'SUBMITTED', createdAt: { gte: sevenDaysAgo } },
+        include: { items: { include: { item: { select: { name: true, sku: true } } } } },
+      }),
+    ]);
+
     const todayRevenue = todayBills.reduce((s, b) => s + Number(b.total), 0);
     const todayItemsSold = todayBills.reduce((s, b) => s + b.items.reduce((si, i) => si + i.quantity, 0), 0);
 
-    const sevenDaysAgo = new Date(today); sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
-    const recentBills = await prisma.bill.findMany({
-      where: { ...bw, status: 'SUBMITTED', createdAt: { gte: sevenDaysAgo } },
-    });
+    // Build 7-day revenue map using Thai date keys
+    const THAI_OFFSET_MS = 7 * 60 * 60 * 1000;
     const dayMap: Record<string, { revenue: number; bills: number }> = {};
     for (let i = 0; i < 7; i++) {
-      const d = new Date(sevenDaysAgo); d.setDate(d.getDate() + i);
-      dayMap[d.toISOString().split('T')[0]] = { revenue: 0, bills: 0 };
+      const d = new Date(sevenDaysAgo.getTime() + i * 24 * 60 * 60 * 1000);
+      const thaiKey = new Date(d.getTime() + THAI_OFFSET_MS).toISOString().split('T')[0];
+      dayMap[thaiKey] = { revenue: 0, bills: 0 };
     }
     for (const b of recentBills) {
-      const key = b.createdAt.toISOString().split('T')[0];
+      const key = new Date(b.createdAt.getTime() + THAI_OFFSET_MS).toISOString().split('T')[0];
       if (dayMap[key]) { dayMap[key].revenue += Number(b.total); dayMap[key].bills++; }
     }
     const revenueByDay = Object.entries(dayMap).map(([date, v]) => ({ date, ...v }));
 
-    const allBillsForItems = await prisma.bill.findMany({
-      where: { ...bw, status: 'SUBMITTED', createdAt: { gte: sevenDaysAgo } },
-      include: { items: { include: { item: { select: { name: true, sku: true } } } } },
-    });
     const itemMap: Record<string, { name: string; sku: string; qty: number; revenue: number }> = {};
     for (const b of allBillsForItems) {
       for (const bi of b.items) {
@@ -130,17 +144,25 @@ router.get('/dashboard', authenticate, requireAdmin, async (req: AuthRequest, re
     }
     const topItems = Object.values(itemMap).sort((a, b) => b.revenue - a.revenue).slice(0, 10);
 
+    // Branch sales: use groupBy to avoid N+1 query
     let branchSales: any[] = [];
     if (req.user!.role === 'SUPER_ADMIN') {
-      const branches = await prisma.branch.findMany({ where: { active: true } });
-      for (const br of branches) {
-        const agg = await prisma.bill.aggregate({
-          where: { branchId: br.id, status: 'SUBMITTED', createdAt: { gte: sevenDaysAgo } },
-          _sum: { total: true }, _count: true,
-        });
-        branchSales.push({ branch: br.name, revenue: Number(agg._sum.total || 0), bills: agg._count });
-      }
+      const [branches, grouped] = await Promise.all([
+        prisma.branch.findMany({ where: { active: true }, select: { id: true, name: true } }),
+        prisma.bill.groupBy({
+          by: ['branchId'],
+          where: { status: 'SUBMITTED', createdAt: { gte: sevenDaysAgo } },
+          _sum: { total: true },
+          _count: true,
+        }),
+      ]);
+      const groupMap = new Map(grouped.map((g) => [g.branchId, g]));
+      branchSales = branches.map((br) => {
+        const g = groupMap.get(br.id);
+        return { branch: br.name, revenue: Number(g?._sum.total || 0), bills: g?._count || 0 };
+      });
     }
+
     res.json({ todayRevenue, todayBills: todayBills.length, todayItemsSold, revenueByDay, topItems, branchSales });
   } catch (e) {
     console.error(e);
@@ -161,6 +183,7 @@ router.get('/sales', authenticate, requireAdmin, async (req: AuthRequest, res: R
         items: { include: { item: { select: { id: true, name: true, sku: true, barcode: true } } } },
       },
       orderBy: { createdAt: 'desc' },
+      take: 2000, // safety cap
     });
 
     const totalRevenue = bills.reduce((s, b) => s + Number(b.total), 0);
@@ -278,8 +301,7 @@ router.get('/download', authenticate, requireAdmin, async (req: AuthRequest, res
   }
 });
 
-// ─── Master Export (unified template) ────────────────────────────────────────
-// Columns: branch name, Bigseller Branch ID, item SKU, barcode, qty, price, sale date
+// ─── Master Export ────────────────────────────────────────────────────────────
 
 router.get('/export-master', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
@@ -332,7 +354,6 @@ router.get('/export-master', authenticate, requireAdmin, async (req: AuthRequest
       });
     });
 
-    ws.getRow(1).font = { bold: true };
     ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E40AF' } };
     ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
 
@@ -357,17 +378,14 @@ router.post('/import/preview', authenticate, requireAdmin, importUpload.single('
     const template = await prisma.reportTemplate.findUnique({ where: { id: templateId } });
     if (!template) return res.status(404).json({ error: 'ไม่พบเทมเพลต' });
 
-    // Load all branches and items for matching
     const allBranches = await prisma.branch.findMany({ where: { active: true } });
     const allItems = await prisma.item.findMany({ where: { active: true } });
 
-    // Parse Excel
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(req.file.buffer as any);
     const ws = wb.worksheets[0];
     if (!ws) return res.status(400).json({ error: 'ไม่พบชีตในไฟล์ Excel' });
 
-    // Read headers from row 1
     const headers: string[] = [];
     ws.getRow(1).eachCell({ includeEmpty: true }, (cell, colNum) => {
       headers[colNum - 1] = cellStr(cell.value);
@@ -384,7 +402,6 @@ router.post('/import/preview', authenticate, requireAdmin, importUpload.single('
     const branchIdCol = colIdx(template.columnBranchId);
     const branchNameCol = colIdx(template.columnBranchName);
 
-    // Helper: find branch by configured field
     const findBranch = (branchValue: string) => {
       if (!branchValue) return null;
       const v = branchValue.trim();
@@ -397,7 +414,6 @@ router.post('/import/preview', authenticate, requireAdmin, importUpload.single('
       }
     };
 
-    // Helper: find item
     const findItem = (itemValue: string) => {
       if (!itemValue) return null;
       const v = itemValue.trim();
@@ -409,19 +425,20 @@ router.post('/import/preview', authenticate, requireAdmin, importUpload.single('
     let totalQty = 0;
     let totalRevenue = 0;
     let matched = 0;
+    let rowCount = 0;
 
     ws.eachRow((row, rowNum) => {
       if (rowNum === 1) return; // skip header
+      if (rowCount >= MAX_IMPORT_ROWS) return; // hard cap to prevent DoS
+      rowCount++;
 
       const getCellVal = (colIndex: number) =>
         colIndex >= 0 ? row.getCell(colIndex + 1).value : null;
 
-      // Get branch identifier
       const rawBranchId = branchIdCol >= 0 ? cellStr(getCellVal(branchIdCol)) : '';
       const rawBranchName = branchNameCol >= 0 ? cellStr(getCellVal(branchNameCol)) : '';
       const rawBranch = rawBranchId || rawBranchName;
 
-      // Get item identifier
       const rawBarcodeVal = barcodeCol >= 0 ? cellStr(getCellVal(barcodeCol)) : '';
       const rawSkuVal = skuCol >= 0 ? cellStr(getCellVal(skuCol)) : '';
       const rawItem = template.itemMatchBy === 'sku' ? rawSkuVal : rawBarcodeVal;
@@ -431,7 +448,6 @@ router.post('/import/preview', authenticate, requireAdmin, importUpload.single('
       const rawPriceVal = getCellVal(priceCol);
       const rawQtyVal = getCellVal(qtyCol);
 
-      // Skip completely empty rows
       if (!rawBranch && !rawItem && !rawDateVal && !rawPriceVal && !rawQtyVal) return;
 
       const saleDate = parseExcelDate(rawDateVal);
@@ -476,6 +492,7 @@ router.post('/import/preview', authenticate, requireAdmin, importUpload.single('
       });
     });
 
+    const truncated = rowCount >= MAX_IMPORT_ROWS;
     res.json({
       rows,
       stats: {
@@ -484,6 +501,8 @@ router.post('/import/preview', authenticate, requireAdmin, importUpload.single('
         unmatched: rows.length - matched,
         totalQty,
         totalRevenue,
+        truncated,
+        maxRows: MAX_IMPORT_ROWS,
       },
     });
   } catch (e) {
@@ -506,7 +525,28 @@ router.post('/import/submit', authenticate, requireAdmin, async (req: AuthReques
       }>;
     };
 
-    if (!rows || rows.length === 0) return res.status(400).json({ error: 'ไม่มีข้อมูลนำเข้า' });
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ error: 'ไม่มีข้อมูลนำเข้า' });
+    }
+    if (rows.length > MAX_IMPORT_ROWS) {
+      return res.status(400).json({ error: `ข้อมูลเกิน ${MAX_IMPORT_ROWS} แถว กรุณาแบ่งนำเข้าทีละส่วน` });
+    }
+
+    // Validate that all referenced branchIds and itemIds exist in DB
+    const uniqueBranchIds = [...new Set(rows.map((r) => r.branchId).filter(Boolean))];
+    const uniqueItemIds = [...new Set(rows.map((r) => r.itemId).filter(Boolean))];
+
+    const [validBranches, validItems] = await Promise.all([
+      prisma.branch.findMany({ where: { id: { in: uniqueBranchIds } }, select: { id: true } }),
+      prisma.item.findMany({ where: { id: { in: uniqueItemIds } }, select: { id: true } }),
+    ]);
+
+    const validBranchSet = new Set(validBranches.map((b) => b.id));
+    const validItemSet = new Set(validItems.map((i) => i.id));
+    const invalidRows = rows.filter((r) => !validBranchSet.has(r.branchId) || !validItemSet.has(r.itemId));
+    if (invalidRows.length > 0) {
+      return res.status(400).json({ error: `พบข้อมูลอ้างอิงไม่ถูกต้อง ${invalidRows.length} แถว กรุณา preview ใหม่` });
+    }
 
     // Group rows by saleDate + branchId → one Bill per group
     const groups = new Map<string, { saleDate: Date; branchId: string; items: typeof rows }>();

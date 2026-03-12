@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../lib/prisma';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, AuthRequest, getSecret } from '../middleware/auth';
 
 const router = Router();
 
@@ -10,6 +10,9 @@ const router = Router();
 router.post('/login', async (req: Request, res: Response) => {
   try {
     const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ error: 'กรุณาระบุชื่อผู้ใช้และรหัสผ่าน' });
+    }
     const user = await prisma.user.findUnique({ where: { username }, include: { branch: true } });
 
     if (!user || !user.active || !(await bcrypt.compare(password, user.password))) {
@@ -18,7 +21,7 @@ router.post('/login', async (req: Request, res: Response) => {
 
     const token = jwt.sign(
       { id: user.id, role: user.role, branchId: user.branchId },
-      process.env.JWT_SECRET || 'secret',
+      getSecret(),
       { expiresIn: '24h' }
     );
 
@@ -40,32 +43,25 @@ router.post('/pos-login', async (req: Request, res: Response) => {
     const branch = await prisma.branch.findUnique({ where: { pincode: String(pincode) } });
     if (!branch || !branch.active) return res.status(401).json({ error: 'รหัส PIN ไม่ถูกต้อง' });
 
-    // Find or create a system POS user for this branch
+    // Upsert system POS user — atomic, avoids race condition on concurrent logins
     const posUsername = `pos_${branch.code.toLowerCase()}`;
-    let posUser = await prisma.user.findUnique({ where: { username: posUsername } });
-
-    if (!posUser) {
-      posUser = await prisma.user.create({
-        data: {
-          username: posUsername,
-          password: await bcrypt.hash(pincode, 10),
-          name: `POS ${branch.name}`,
-          role: 'CASHIER',
-          branchId: branch.id,
-          isSystem: true,
-          active: true,
-        },
-      });
-    }
-
-    // Update POS user branch if it changed
-    if (posUser.branchId !== branch.id) {
-      posUser = await prisma.user.update({ where: { id: posUser.id }, data: { branchId: branch.id } });
-    }
+    const posUser = await prisma.user.upsert({
+      where: { username: posUsername },
+      update: { branchId: branch.id, active: true },
+      create: {
+        username: posUsername,
+        password: await bcrypt.hash(posUsername, 10), // password unused; PIN is the auth mechanism
+        name: `POS ${branch.name}`,
+        role: 'CASHIER',
+        branchId: branch.id,
+        isSystem: true,
+        active: true,
+      },
+    });
 
     const token = jwt.sign(
       { id: posUser.id, role: 'CASHIER', branchId: branch.id, posMode: true },
-      process.env.JWT_SECRET || 'secret',
+      getSecret(),
       { expiresIn: '12h' }
     );
 
