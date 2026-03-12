@@ -43,7 +43,7 @@ export default function Reports() {
       setBills(data.bills);
       setSummary(data.summary);
     } catch {
-      toast.error('Failed to load report');
+      toast.error('โหลดรายงานไม่สำเร็จ');
     } finally {
       setLoading(false);
     }
@@ -63,12 +63,12 @@ export default function Reports() {
       const url = URL.createObjectURL(new Blob([res.data]));
       const a = document.createElement('a');
       a.href = url;
-      a.download = `sales-report-${filters.startDate}-${filters.endDate}.xlsx`;
+      a.download = `รายงานยอดขาย-${filters.startDate}-${filters.endDate}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
-      toast.success('Report downloaded');
+      toast.success('ดาวน์โหลดรายงานเรียบร้อย');
     } catch {
-      toast.error('Download failed');
+      toast.error('ดาวน์โหลดไม่สำเร็จ');
     } finally {
       setDownloading(false);
     }
@@ -80,27 +80,27 @@ export default function Reports() {
     <div className="space-y-4">
       <div className="flex items-center gap-2">
         <BarChart3 className="text-blue-600" size={22} />
-        <h1 className="text-xl font-bold text-gray-800">Sales Report</h1>
+        <h1 className="text-xl font-bold text-gray-800">รายงานยอดขาย</h1>
       </div>
 
       {/* Filters */}
       <div className="card">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div>
-            <label className="label">From</label>
+            <label className="label">ตั้งแต่วันที่</label>
             <input type="date" value={filters.startDate}
               onChange={(e) => setFilters((f) => ({ ...f, startDate: e.target.value }))} className="input" />
           </div>
           <div>
-            <label className="label">To</label>
+            <label className="label">ถึงวันที่</label>
             <input type="date" value={filters.endDate}
               onChange={(e) => setFilters((f) => ({ ...f, endDate: e.target.value }))} className="input" />
           </div>
           {user?.role === 'SUPER_ADMIN' && (
             <div>
-              <label className="label">Branch</label>
+              <label className="label">สาขา</label>
               <select value={filters.branchId} onChange={(e) => setFilters((f) => ({ ...f, branchId: e.target.value }))} className="input">
-                <option value="">All Branches</option>
+                <option value="">ทุกสาขา</option>
                 {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
             </div>
@@ -108,10 +108,10 @@ export default function Reports() {
         </div>
         <div className="flex gap-2 mt-3">
           <button onClick={loadReport} className="btn-primary flex items-center gap-1">
-            <RefreshCw size={15} /> Generate
+            <RefreshCw size={15} /> ดึงรายงาน
           </button>
           <button onClick={handleDownload} disabled={downloading || bills.length === 0} className="btn-success flex items-center gap-1">
-            <Download size={15} /> {downloading ? 'Downloading…' : 'Download Excel'}
+            <Download size={15} /> {downloading ? 'กำลังดาวน์โหลด...' : 'ดาวน์โหลด Excel'}
           </button>
         </div>
       </div>
@@ -120,9 +120,9 @@ export default function Reports() {
       {summary && (
         <div className="grid grid-cols-3 gap-3">
           {[
-            { label: 'Total Revenue', value: `฿${fmt(summary.totalRevenue)}` },
-            { label: 'Total Bills', value: summary.totalBills },
-            { label: 'Unique Items', value: summary.items.length },
+            { label: 'รายได้รวม', value: `฿${fmt(summary.totalRevenue)}` },
+            { label: 'จำนวนบิล', value: summary.totalBills },
+            { label: 'รายการสินค้า', value: summary.items.length },
           ].map((s) => (
             <div key={s.label} className="card text-center py-3">
               <p className="text-2xl font-bold text-gray-800">{s.value}</p>
@@ -135,8 +135,8 @@ export default function Reports() {
       {/* Item Summary */}
       {summary && summary.items.length > 0 && (
         <div className="card p-0 overflow-hidden">
-          <div className="px-5 py-3 border-b flex items-center justify-between">
-            <h2 className="font-semibold text-gray-700">Item Summary</h2>
+          <div className="px-5 py-3 border-b">
+            <h2 className="font-semibold text-gray-700">สรุปยอดขายตามสินค้า</h2>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -144,10 +144,10 @@ export default function Reports() {
                 <tr>
                   <th className="table-header">#</th>
                   <th className="table-header">SKU</th>
-                  <th className="table-header">Item Name</th>
-                  <th className="table-header text-right">Qty Sold</th>
-                  <th className="table-header text-right">Revenue</th>
-                  <th className="table-header text-right">% of Total</th>
+                  <th className="table-header">ชื่อสินค้า</th>
+                  <th className="table-header text-right">จำนวนที่ขาย</th>
+                  <th className="table-header text-right">รายได้</th>
+                  <th className="table-header text-right">% ของรวม</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -172,23 +172,23 @@ export default function Reports() {
       {/* Bills table */}
       <div className="card p-0 overflow-hidden">
         <div className="px-5 py-3 border-b">
-          <h2 className="font-semibold text-gray-700">Bills ({bills.length})</h2>
+          <h2 className="font-semibold text-gray-700">รายการบิล ({bills.length} รายการ)</h2>
         </div>
         {loading ? (
-          <div className="p-8 text-center text-gray-400">Loading…</div>
+          <div className="p-8 text-center text-gray-400">กำลังโหลด...</div>
         ) : bills.length === 0 ? (
-          <div className="p-8 text-center text-gray-400">No submitted bills in this period</div>
+          <div className="p-8 text-center text-gray-400">ไม่พบบิลที่ส่งแล้วในช่วงเวลานี้</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="table-header">Bill Number</th>
-                  <th className="table-header">Branch</th>
-                  <th className="table-header">Cashier</th>
-                  <th className="table-header">Date</th>
-                  <th className="table-header text-right">Items</th>
-                  <th className="table-header text-right">Total</th>
+                  <th className="table-header">เลขที่บิล</th>
+                  <th className="table-header">สาขา</th>
+                  <th className="table-header">แคชเชียร์</th>
+                  <th className="table-header">วันที่</th>
+                  <th className="table-header text-right">รายการ</th>
+                  <th className="table-header text-right">ยอดรวม</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -205,7 +205,7 @@ export default function Reports() {
               </tbody>
               <tfoot className="border-t-2">
                 <tr className="bg-blue-50">
-                  <td colSpan={5} className="table-cell font-bold text-right">Total Revenue</td>
+                  <td colSpan={5} className="table-cell font-bold text-right">รายได้รวมทั้งหมด</td>
                   <td className="table-cell text-right font-bold text-blue-700">฿{fmt(summary?.totalRevenue || 0)}</td>
                 </tr>
               </tfoot>

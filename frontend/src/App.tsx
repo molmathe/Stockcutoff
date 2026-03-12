@@ -1,20 +1,27 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
 import Login from './pages/Login';
-import POS from './pages/POS';
-import Bills from './pages/Bills';
-import Dashboard from './pages/admin/Dashboard';
-import Items from './pages/admin/Items';
-import Branches from './pages/admin/Branches';
-import Users from './pages/admin/Users';
-import Reports from './pages/admin/Reports';
+import POSLogin from './pages/POSLogin';
+
+const POS = lazy(() => import('./pages/POS'));
+const Bills = lazy(() => import('./pages/Bills'));
+const Dashboard = lazy(() => import('./pages/admin/Dashboard'));
+const Items = lazy(() => import('./pages/admin/Items'));
+const Branches = lazy(() => import('./pages/admin/Branches'));
+const Users = lazy(() => import('./pages/admin/Users'));
+const Reports = lazy(() => import('./pages/admin/Reports'));
+const Categories = lazy(() => import('./pages/admin/Categories'));
+
+const Loader = () => (
+  <div className="flex h-full items-center justify-center text-gray-400 text-sm">กำลังโหลด...</div>
+);
 
 const Guard: React.FC<{ children: React.ReactNode; roles?: string[] }> = ({ children, roles }) => {
   const { user, loading } = useAuth();
-  if (loading) return <div className="flex h-screen items-center justify-center text-gray-400">Loading…</div>;
+  if (loading) return <Loader />;
   if (!user) return <Navigate to="/login" replace />;
   if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
   return <>{children}</>;
@@ -28,19 +35,23 @@ const Root = () => {
 
 function AppRoutes() {
   return (
-    <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route element={<Guard><Layout /></Guard>}>
-        <Route index element={<Root />} />
-        <Route path="pos" element={<Guard><POS /></Guard>} />
-        <Route path="bills" element={<Guard><Bills /></Guard>} />
-        <Route path="admin/dashboard" element={<Guard roles={['SUPER_ADMIN','BRANCH_ADMIN']}><Dashboard /></Guard>} />
-        <Route path="admin/items" element={<Guard roles={['SUPER_ADMIN','BRANCH_ADMIN']}><Items /></Guard>} />
-        <Route path="admin/branches" element={<Guard roles={['SUPER_ADMIN','BRANCH_ADMIN']}><Branches /></Guard>} />
-        <Route path="admin/users" element={<Guard roles={['SUPER_ADMIN','BRANCH_ADMIN']}><Users /></Guard>} />
-        <Route path="admin/reports" element={<Guard roles={['SUPER_ADMIN','BRANCH_ADMIN']}><Reports /></Guard>} />
-      </Route>
-    </Routes>
+    <Suspense fallback={<Loader />}>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/pos-login" element={<POSLogin />} />
+        <Route element={<Guard><Layout /></Guard>}>
+          <Route index element={<Root />} />
+          <Route path="pos" element={<Guard><POS /></Guard>} />
+          <Route path="bills" element={<Guard><Bills /></Guard>} />
+          <Route path="admin/dashboard" element={<Guard roles={['SUPER_ADMIN', 'BRANCH_ADMIN']}><Dashboard /></Guard>} />
+          <Route path="admin/items" element={<Guard roles={['SUPER_ADMIN', 'BRANCH_ADMIN']}><Items /></Guard>} />
+          <Route path="admin/branches" element={<Guard roles={['SUPER_ADMIN', 'BRANCH_ADMIN']}><Branches /></Guard>} />
+          <Route path="admin/users" element={<Guard roles={['SUPER_ADMIN', 'BRANCH_ADMIN']}><Users /></Guard>} />
+          <Route path="admin/reports" element={<Guard roles={['SUPER_ADMIN', 'BRANCH_ADMIN']}><Reports /></Guard>} />
+          <Route path="admin/categories" element={<Guard roles={['SUPER_ADMIN', 'BRANCH_ADMIN']}><Categories /></Guard>} />
+        </Route>
+      </Routes>
+    </Suspense>
   );
 }
 

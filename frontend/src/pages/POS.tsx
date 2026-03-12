@@ -1,10 +1,13 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { Camera, Search, Plus, Minus, Trash2, ShoppingCart, CheckCircle, X } from 'lucide-react';
+import {
+  Camera, Search, Plus, Minus, Trash2, ShoppingCart,
+  CheckCircle, X, BarChart3, RefreshCw, Pencil, Lock,
+} from 'lucide-react';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import BarcodeScanner from '../components/BarcodeScanner';
-import type { Item, Branch } from '../types';
+import type { Item, Branch, TodaySummary, Bill } from '../types';
 
 interface CartItem {
   itemId: string;
@@ -14,7 +17,18 @@ interface CartItem {
   quantity: number;
   price: number;
   discount: number;
+  discountStr: string;
 }
+
+const numericKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  if (
+    !/[\d.]/.test(e.key) &&
+    !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Home', 'End'].includes(e.key) &&
+    !(e.ctrlKey || e.metaKey)
+  ) {
+    e.preventDefault();
+  }
+};
 
 export default function POS() {
   const { user } = useAuth();
@@ -22,22 +36,41 @@ export default function POS() {
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [scanning, setScanning] = useState(false);
   const [notes, setNotes] = useState('');
-  const [billDiscount, setBillDiscount] = useState(0);
+  const [billDiscountStr, setBillDiscountStr] = useState('0');
   const [saving, setSaving] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranch, setSelectedBranch] = useState(user?.branchId || '');
   const [lastSaved, setLastSaved] = useState<string | null>(null);
+  const [editingBillId, setEditingBillId] = useState<string | null>(null);
+  const [summary, setSummary] = useState<TodaySummary | null>(null);
+  const [loadingSummary, setLoadingSummary] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
+  const [closingDay, setClosingDay] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const isAdmin = user?.role !== 'CASHIER';
+  const billDiscount = parseFloat(billDiscountStr) || 0;
+  const fmt = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2 });
 
   useEffect(() => {
     if (isAdmin) {
       client.get('/branches').then((r) => setBranches(r.data)).catch(() => {});
     }
+    loadSummary();
     inputRef.current?.focus();
   }, []);
+
+  const loadSummary = async () => {
+    setLoadingSummary(true);
+    try {
+      const branchId = selectedBranch || user?.branchId;
+      const { data } = await client.get('/bills/today-summary', {
+        params: branchId ? { branchId } : {},
+      });
+      setSummary(data);
+    } catch { /* silent */ }
+    finally { setLoadingSummary(false); }
+  };
 
   const lookupBarcode = useCallback(async (code: string) => {
     if (!code.trim()) return;
@@ -46,7 +79,7 @@ export default function POS() {
       addToCart(item);
       setBarcodeInput('');
     } catch {
-      toast.error(`Item not found: ${code}`);
+      toast.error(`ไม่พบสินค้า: ${code}`);
     }
     inputRef.current?.focus();
   }, []);
@@ -63,87 +96,153 @@ export default function POS() {
         sku: item.sku,
         imageUrl: item.imageUrl,
         quantity: 1,
-        price: parseFloat(item.defaultPrice),
+        price: parseFloat(String(item.defaultPrice)),
         discount: 0,
+        discountStr: '0',
       }];
     });
-    toast.success(`Added: ${item.name}`, { duration: 1500, icon: '✅' });
+    toast.success(`เพิ่ม: ${item.name}`, { duration: 1500, icon: '✅' });
   };
 
-  const updateItem = (itemId: string, field: 'quantity' | 'price' | 'discount', value: number) => {
-    setCartItems((prev) => prev.map((c) => {
-      if (c.itemId !== itemId) return c;
-      const updated = { ...c, [field]: Math.max(0, value) };
-      if (field === 'quantity' && updated.quantity === 0) return c; // handled by remove
-      return updated;
-    }));
+  const updateQty = (itemId: string, qty: number) => {
+    if (qty <= 0) { removeItem(itemId); return; }
+    setCartItems((prev) => prev.map((c) => c.itemId === itemId ? { ...c, quantity: qty } : c));
+  };
+
+  const updatePrice = (itemId: string, priceStr: string) => {
+    const price = parseFloat(priceStr.replace(/[^\d.]/g, '')) || 0;
+    setCartItems((prev) => prev.map((c) => c.itemId === itemId ? { ...c, price } : c));
+  };
+
+  const updateDiscount = (itemId: string, discountStr: string) => {
+    const clean = discountStr.replace(/[^\d.]/g, '');
+    const discount = parseFloat(clean) || 0;
+    setCartItems((prev) => prev.map((c) => c.itemId === itemId ? { ...c, discount, discountStr: clean } : c));
   };
 
   const removeItem = (itemId: string) => setCartItems((prev) => prev.filter((c) => c.itemId !== itemId));
+
+  const clearCart = () => {
+    setCartItems([]);
+    setBillDiscountStr('0');
+    setNotes('');
+    setEditingBillId(null);
+    setLastSaved(null);
+  };
 
   const subtotal = cartItems.reduce((s, c) => s + c.price * c.quantity - c.discount, 0);
   const total = Math.max(0, subtotal - billDiscount);
 
   const saveBill = async () => {
-    if (cartItems.length === 0) { toast.error('Cart is empty'); return; }
+    if (cartItems.length === 0) { toast.error('ตะกร้าว่างเปล่า'); return; }
     const branchId = selectedBranch || user?.branchId;
-    if (!branchId) { toast.error('Please select a branch'); return; }
+    if (!branchId) { toast.error('กรุณาเลือกสาขา'); return; }
     setSaving(true);
     try {
-      const { data } = await client.post('/bills', {
+      const payload = {
         branchId,
         discount: billDiscount,
         notes,
-        items: cartItems.map((c) => ({ itemId: c.itemId, quantity: c.quantity, price: c.price, discount: c.discount })),
-      });
-      setLastSaved(data.billNumber);
-      setCartItems([]);
-      setBillDiscount(0);
-      setNotes('');
-      toast.success(`Bill saved: ${data.billNumber}`);
+        items: cartItems.map((c) => ({
+          itemId: c.itemId,
+          quantity: c.quantity,
+          price: c.price,
+          discount: c.discount,
+        })),
+      };
+      let billNumber: string;
+      if (editingBillId) {
+        const { data } = await client.put(`/bills/${editingBillId}`, payload);
+        billNumber = data.billNumber;
+        toast.success(`แก้ไขบิล ${billNumber} เรียบร้อย`);
+      } else {
+        const { data } = await client.post('/bills', payload);
+        billNumber = data.billNumber;
+        toast.success(`บันทึกบิล: ${billNumber}`);
+      }
+      setLastSaved(billNumber);
+      clearCart();
+      loadSummary();
     } catch {
-      toast.error('Failed to save bill');
+      toast.error('บันทึกบิลไม่สำเร็จ');
     } finally {
       setSaving(false);
       inputRef.current?.focus();
     }
   };
 
-  const submitDay = async () => {
+  const loadBillForEdit = (bill: Bill) => {
+    setEditingBillId(bill.id);
+    setBillDiscountStr(String(bill.discount || '0'));
+    setNotes(bill.notes || '');
+    setCartItems(
+      bill.items.map((bi) => ({
+        itemId: bi.itemId,
+        name: bi.item?.name || `สินค้า (${bi.itemId.slice(0, 8)})`,
+        sku: bi.item?.sku || '',
+        imageUrl: bi.item?.imageUrl || null,
+        quantity: bi.quantity,
+        price: parseFloat(String(bi.price)),
+        discount: parseFloat(String(bi.discount || 0)),
+        discountStr: String(bi.discount || '0'),
+      }))
+    );
+    setShowSummary(false);
+    toast(`แก้ไขบิล ${bill.billNumber}`, { icon: '✏️' });
+    setTimeout(() => inputRef.current?.focus(), 100);
+  };
+
+  const closeDay = async () => {
+    if (!confirm('ปิดวันนี้?\n\nบิลที่เปิดอยู่ทั้งหมดจะถูกส่ง และไม่สามารถแก้ไขได้อีก')) return;
     const branchId = selectedBranch || user?.branchId;
-    setSubmitting(true);
+    setClosingDay(true);
     try {
       const { data } = await client.post('/bills/submit-day', { branchId });
-      toast.success(`${data.count} bills submitted for end of day!`);
+      toast.success(`ปิดวัน: ส่งบิล ${data.count} รายการเรียบร้อย`);
+      loadSummary();
     } catch {
-      toast.error('Failed to submit bills');
+      toast.error('ปิดวันไม่สำเร็จ');
     } finally {
-      setSubmitting(false);
+      setClosingDay(false);
     }
   };
 
+  const openBills = summary?.bills.filter((b) => b.status === 'OPEN') ?? [];
+
   return (
     <div className="flex flex-col lg:flex-row gap-4 h-full">
-      {scanning && <BarcodeScanner onScan={lookupBarcode} onClose={() => { setScanning(false); inputRef.current?.focus(); }} />}
+      {scanning && (
+        <BarcodeScanner
+          onScan={lookupBarcode}
+          onClose={() => { setScanning(false); inputRef.current?.focus(); }}
+        />
+      )}
 
-      {/* Left: Scanner + Info */}
+      {/* ===== Left panel ===== */}
       <div className="lg:w-1/2 space-y-4">
+
+        {/* Scanner card */}
         <div className="card">
           <h2 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
-            <ShoppingCart size={18} /> Point of Sale
+            <ShoppingCart size={18} /> หน้าขาย (POS)
+            {editingBillId && (
+              <span className="ml-auto text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+                <Pencil size={11} /> กำลังแก้ไขบิล
+              </span>
+            )}
           </h2>
 
           {isAdmin && (
             <div className="mb-3">
-              <label className="label">Branch</label>
+              <label className="label">สาขา</label>
               <select value={selectedBranch} onChange={(e) => setSelectedBranch(e.target.value)} className="input">
-                <option value="">-- Select Branch --</option>
+                <option value="">— เลือกสาขา —</option>
                 {branches.map((b) => <option key={b.id} value={b.id}>{b.name} ({b.code})</option>)}
               </select>
             </div>
           )}
 
-          <label className="label">Scan / Enter Barcode</label>
+          <label className="label">สแกน / กรอกบาร์โค้ด</label>
           <div className="flex gap-2">
             <input
               ref={inputRef}
@@ -152,24 +251,25 @@ export default function POS() {
               onChange={(e) => setBarcodeInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); lookupBarcode(barcodeInput); } }}
               className="input flex-1"
-              placeholder="Scan barcode or type and press Enter…"
+              placeholder="สแกนบาร์โค้ดหรือพิมพ์แล้วกด Enter…"
               autoComplete="off"
             />
             <button onClick={() => lookupBarcode(barcodeInput)} className="btn-primary px-3">
               <Search size={18} />
             </button>
-            <button onClick={() => setScanning(true)} className="btn-secondary px-3" title="Camera Scan">
+            <button onClick={() => setScanning(true)} className="btn-secondary px-3" title="สแกนด้วยกล้อง">
               <Camera size={18} />
             </button>
           </div>
-          <p className="text-xs text-gray-400 mt-1">USB scanner will auto-submit on Enter key</p>
+          <p className="text-xs text-gray-400 mt-1">เครื่องสแกน USB จะส่งข้อมูลอัตโนมัติเมื่อกด Enter</p>
         </div>
 
+        {/* Last saved notification */}
         {lastSaved && (
           <div className="card border-green-200 bg-green-50 flex items-center gap-3">
             <CheckCircle className="text-green-600 shrink-0" size={20} />
             <div>
-              <p className="text-sm font-medium text-green-700">Bill saved successfully</p>
+              <p className="text-sm font-medium text-green-700">บันทึกบิลเรียบร้อย</p>
               <p className="text-xs text-green-600">{lastSaved}</p>
             </div>
             <button onClick={() => setLastSaved(null)} className="ml-auto text-green-400 hover:text-green-600">
@@ -178,44 +278,137 @@ export default function POS() {
           </div>
         )}
 
+        {/* Bill options */}
         <div className="card">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="font-medium text-gray-700">Bill Options</h3>
-          </div>
+          <h3 className="font-medium text-gray-700 mb-2">ตัวเลือกบิล</h3>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">Bill Discount</label>
+              <label className="label">ส่วนลดบิล (฿)</label>
               <input
-                type="number"
-                min="0"
-                value={billDiscount}
-                onChange={(e) => setBillDiscount(Number(e.target.value))}
+                type="text"
+                inputMode="decimal"
+                value={billDiscountStr}
+                onKeyDown={numericKeyDown}
+                onChange={(e) => setBillDiscountStr(e.target.value.replace(/[^\d.]/g, ''))}
                 className="input"
+                placeholder="0"
               />
             </div>
             <div>
-              <label className="label">Notes</label>
+              <label className="label">หมายเหตุ</label>
               <input
                 type="text"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 className="input"
-                placeholder="Optional notes"
+                placeholder="หมายเหตุ (ถ้ามี)"
               />
             </div>
           </div>
         </div>
+
+        {/* Daily Summary (collapsible) */}
+        <div className="card p-0 overflow-hidden">
+          <button
+            onClick={() => { setShowSummary(!showSummary); if (!showSummary) loadSummary(); }}
+            className="w-full px-4 py-3 flex items-center gap-2 hover:bg-gray-50 transition-colors text-left"
+          >
+            <BarChart3 size={16} className="text-blue-600 shrink-0" />
+            <span className="font-medium text-gray-700 text-sm">สรุปยอดขายวันนี้</span>
+            {summary && !loadingSummary && (
+              <span className="ml-auto text-xs text-gray-500 shrink-0">
+                {summary.totalBills} บิล · ฿{fmt(summary.totalRevenue)}
+              </span>
+            )}
+            {loadingSummary && <RefreshCw size={13} className="ml-auto animate-spin text-gray-400" />}
+            <span className="text-gray-400 text-xs ml-1">{showSummary ? '▲' : '▼'}</span>
+          </button>
+
+          {showSummary && (
+            <div className="border-t px-4 pb-4 space-y-3">
+              {/* Stats row */}
+              <div className="flex items-center gap-3 pt-3">
+                <div className="grid grid-cols-3 gap-3 flex-1">
+                  <div className="text-center bg-gray-50 rounded-lg py-2">
+                    <p className="text-xl font-bold text-gray-800">{summary?.totalBills ?? 0}</p>
+                    <p className="text-xs text-gray-500">บิลทั้งหมด</p>
+                  </div>
+                  <div className="text-center bg-orange-50 rounded-lg py-2">
+                    <p className="text-xl font-bold text-orange-600">{summary?.openBills ?? 0}</p>
+                    <p className="text-xs text-gray-500">บิลเปิด</p>
+                  </div>
+                  <div className="text-center bg-blue-50 rounded-lg py-2">
+                    <p className="text-lg font-bold text-blue-700">฿{fmt(summary?.totalRevenue ?? 0)}</p>
+                    <p className="text-xs text-gray-500">รายได้รวม</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={loadSummary}
+                  disabled={loadingSummary}
+                  className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1 border border-gray-200 rounded px-2 py-1"
+                >
+                  <RefreshCw size={13} className={loadingSummary ? 'animate-spin' : ''} />
+                  รีเฟรช
+                </button>
+                <button
+                  onClick={closeDay}
+                  disabled={closingDay || !summary?.openBills}
+                  className="btn-danger text-xs flex items-center gap-1 py-1 px-3 ml-auto"
+                >
+                  <Lock size={13} />
+                  {closingDay ? 'กำลังปิดวัน...' : 'ปิดวัน'}
+                </button>
+              </div>
+
+              {/* Open bills list (editable) */}
+              {openBills.length > 0 ? (
+                <div>
+                  <p className="text-xs font-semibold text-gray-600 mb-2">บิลที่เปิดอยู่ (กดแก้ไขเพื่อโหลดเข้าตะกร้า)</p>
+                  <div className="space-y-1.5 max-h-52 overflow-y-auto">
+                    {openBills.map((bill) => (
+                      <div
+                        key={bill.id}
+                        className="flex items-center justify-between bg-orange-50 border border-orange-100 rounded-lg px-3 py-2"
+                      >
+                        <div>
+                          <p className="text-xs font-mono font-semibold text-gray-700">{bill.billNumber}</p>
+                          <p className="text-xs text-gray-500">
+                            {bill.items.length} รายการ · ฿{fmt(parseFloat(String(bill.total)))}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => loadBillForEdit(bill)}
+                          className="text-xs bg-orange-100 text-orange-700 hover:bg-orange-200 rounded px-2.5 py-1 flex items-center gap-1 transition-colors"
+                        >
+                          <Pencil size={12} /> แก้ไข
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : summary && (
+                <p className="text-xs text-gray-400 text-center py-2 bg-gray-50 rounded-lg">
+                  ไม่มีบิลที่เปิดอยู่ในวันนี้
+                </p>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Right: Cart */}
+      {/* ===== Right: Cart ===== */}
       <div className="lg:w-1/2 flex flex-col">
         <div className="card flex-1 flex flex-col min-h-0">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-gray-700">Cart ({cartItems.length} items)</h3>
+            <h3 className="font-semibold text-gray-700">
+              ตะกร้าสินค้า ({cartItems.length} รายการ)
+            </h3>
             {cartItems.length > 0 && (
-              <button onClick={() => setCartItems([])} className="text-xs text-red-500 hover:text-red-700">
-                Clear all
-              </button>
+              <button onClick={clearCart} className="text-xs text-red-500 hover:text-red-700">ล้างตะกร้า</button>
             )}
           </div>
 
@@ -223,64 +416,84 @@ export default function POS() {
             <div className="flex-1 flex items-center justify-center text-gray-300">
               <div className="text-center">
                 <ShoppingCart size={48} className="mx-auto mb-2" />
-                <p className="text-sm">Scan items to add to cart</p>
+                <p className="text-sm">สแกนสินค้าเพื่อเพิ่มในตะกร้า</p>
               </div>
             </div>
           ) : (
-            <div className="flex-1 overflow-y-auto space-y-2 min-h-0">
+            <div className="flex-1 overflow-y-auto space-y-2 min-h-0 pr-1">
               {cartItems.map((item) => (
-                <div key={item.itemId} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                <div
+                  key={item.itemId}
+                  className="flex items-center gap-2 p-2.5 bg-gray-50 rounded-lg border border-gray-100"
+                >
                   {item.imageUrl ? (
-                    <img src={item.imageUrl} alt={item.name} className="w-10 h-10 object-cover rounded-lg" />
+                    <img src={item.imageUrl} alt={item.name} className="w-9 h-9 object-cover rounded-lg shrink-0" />
                   ) : (
-                    <div className="w-10 h-10 bg-gray-200 rounded-lg flex items-center justify-center text-xs text-gray-400">
+                    <div className="w-9 h-9 bg-gray-200 rounded-lg flex items-center justify-center text-xs text-gray-400 shrink-0">
                       {item.sku.slice(0, 3)}
                     </div>
                   )}
+
+                  {/* Name */}
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{item.name}</p>
                     <p className="text-xs text-gray-400">{item.sku}</p>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => item.quantity > 1 ? updateItem(item.itemId, 'quantity', item.quantity - 1) : removeItem(item.itemId)}
-                      className="w-6 h-6 rounded bg-gray-200 flex items-center justify-center hover:bg-gray-300">
+
+                  {/* Quantity */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => updateQty(item.itemId, item.quantity - 1)}
+                      className="w-6 h-6 rounded bg-gray-200 flex items-center justify-center hover:bg-gray-300"
+                    >
                       <Minus size={12} />
                     </button>
                     <input
-                      type="number"
-                      min="1"
+                      type="text"
+                      inputMode="numeric"
                       value={item.quantity}
-                      onChange={(e) => updateItem(item.itemId, 'quantity', parseInt(e.target.value) || 1)}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value.replace(/\D/g, '')) || 1;
+                        updateQty(item.itemId, v);
+                      }}
                       className="w-10 text-center text-sm border border-gray-300 rounded px-1 py-0.5"
                     />
-                    <button onClick={() => updateItem(item.itemId, 'quantity', item.quantity + 1)}
-                      className="w-6 h-6 rounded bg-gray-200 flex items-center justify-center hover:bg-gray-300">
+                    <button
+                      onClick={() => updateQty(item.itemId, item.quantity + 1)}
+                      className="w-6 h-6 rounded bg-gray-200 flex items-center justify-center hover:bg-gray-300"
+                    >
                       <Plus size={12} />
                     </button>
                   </div>
-                  <div className="flex flex-col items-end gap-1 w-20">
+
+                  {/* Price + Discount */}
+                  <div className="flex flex-col items-end gap-1 w-20 shrink-0">
                     <input
-                      type="number"
-                      min="0"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       value={item.price}
-                      onChange={(e) => updateItem(item.itemId, 'price', parseFloat(e.target.value) || 0)}
+                      onKeyDown={numericKeyDown}
+                      onChange={(e) => updatePrice(item.itemId, e.target.value)}
                       className="w-full text-right text-sm border border-gray-300 rounded px-1 py-0.5"
-                      title="Price"
+                      title="ราคา"
                     />
                     <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={item.discount}
-                      onChange={(e) => updateItem(item.itemId, 'discount', parseFloat(e.target.value) || 0)}
+                      type="text"
+                      inputMode="decimal"
+                      value={item.discountStr}
+                      onKeyDown={numericKeyDown}
+                      onChange={(e) => updateDiscount(item.itemId, e.target.value)}
                       className="w-full text-right text-xs border border-orange-200 bg-orange-50 rounded px-1 py-0.5 text-orange-700"
-                      title="Item Discount"
+                      title="ส่วนลดสินค้า (฿)"
+                      placeholder="ส่วนลด"
                     />
                   </div>
-                  <p className="text-sm font-semibold w-16 text-right">
-                    {(item.price * item.quantity - item.discount).toFixed(2)}
+
+                  {/* Line total */}
+                  <p className="text-sm font-semibold w-16 text-right shrink-0">
+                    ฿{fmt(item.price * item.quantity - item.discount)}
                   </p>
+
                   <button onClick={() => removeItem(item.itemId)} className="text-red-400 hover:text-red-600 shrink-0">
                     <Trash2 size={16} />
                   </button>
@@ -292,30 +505,42 @@ export default function POS() {
           {/* Totals */}
           <div className="border-t pt-3 mt-3 space-y-1">
             <div className="flex justify-between text-sm text-gray-500">
-              <span>Subtotal</span><span>{subtotal.toFixed(2)}</span>
+              <span>ยอดรวมย่อย</span>
+              <span>฿{fmt(subtotal)}</span>
             </div>
             {billDiscount > 0 && (
               <div className="flex justify-between text-sm text-orange-600">
-                <span>Bill Discount</span><span>-{billDiscount.toFixed(2)}</span>
+                <span>ส่วนลดบิล</span>
+                <span>-฿{fmt(billDiscount)}</span>
               </div>
             )}
             <div className="flex justify-between text-lg font-bold text-gray-900 pt-1 border-t">
-              <span>Total</span><span>{total.toFixed(2)}</span>
+              <span>ยอดสุทธิ</span>
+              <span>฿{fmt(total)}</span>
             </div>
           </div>
 
-          {/* Actions */}
+          {/* Action buttons */}
           <div className="flex gap-2 mt-4">
-            <button onClick={saveBill} disabled={saving || cartItems.length === 0} className="btn-primary flex-1 py-2.5">
-              {saving ? 'Saving…' : '💾 Save Bill'}
+            <button
+              onClick={saveBill}
+              disabled={saving || cartItems.length === 0}
+              className="btn-primary flex-1 py-2.5"
+            >
+              {saving ? 'กำลังบันทึก...' : editingBillId ? '💾 อัพเดทบิล' : '💾 บันทึกบิล'}
             </button>
-            <button onClick={submitDay} disabled={submitting} className="btn-success px-4 py-2.5" title="Submit all today's bills">
-              {submitting ? '…' : '✅ End of Day'}
-            </button>
+            {editingBillId && (
+              <button onClick={clearCart} className="btn-secondary px-4 py-2.5" title="ยกเลิกการแก้ไข">
+                <X size={16} />
+              </button>
+            )}
           </div>
-          <p className="text-xs text-gray-400 text-center mt-1">
-            "End of Day" submits all open bills for today
-          </p>
+
+          {editingBillId && (
+            <p className="text-xs text-orange-600 text-center mt-1">
+              กำลังแก้ไขบิลที่มีอยู่ · กด X เพื่อยกเลิกและล้างตะกร้า
+            </p>
+          )}
         </div>
       </div>
     </div>

@@ -9,6 +9,7 @@ import branchRoutes from './routes/branches';
 import billRoutes from './routes/bills';
 import userRoutes from './routes/users';
 import reportRoutes from './routes/reports';
+import categoryRoutes from './routes/categories';
 
 dotenv.config();
 
@@ -28,6 +29,7 @@ app.use('/api/branches', branchRoutes);
 app.use('/api/bills', billRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/categories', categoryRoutes);
 
 app.get('/health', (_req, res) => res.json({ status: 'ok', time: new Date() }));
 

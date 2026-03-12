@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import client from '../api/client';
-import type { User, Branch } from '../types';
+import type { Branch } from '../types';
 
 interface AuthUser {
   id: string;
@@ -9,11 +9,13 @@ interface AuthUser {
   role: 'SUPER_ADMIN' | 'BRANCH_ADMIN' | 'CASHIER';
   branchId: string | null;
   branch: Branch | null;
+  posMode?: boolean;
 }
 
 interface AuthCtx {
   user: AuthUser | null;
   login: (username: string, password: string) => Promise<void>;
+  posLogin: (pincode: string) => Promise<void>;
   logout: () => void;
   loading: boolean;
 }
@@ -36,10 +38,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  // Standard username + password login (admin/cashier accounts)
   const login = async (username: string, password: string) => {
     const r = await client.post('/auth/login', { username, password });
     localStorage.setItem('token', r.data.token);
     setUser(r.data.user);
+  };
+
+  // POS pincode login — issues a branch-scoped CASHIER session
+  const posLogin = async (pincode: string) => {
+    const r = await client.post('/auth/pos-login', { pincode });
+    localStorage.setItem('token', r.data.token);
+    setUser({ ...r.data.user, posMode: true });
   };
 
   const logout = () => {
@@ -47,7 +57,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
   };
 
-  return <AuthContext.Provider value={{ user, login, logout, loading }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ user, login, posLogin, logout, loading }}>{children}</AuthContext.Provider>;
 };
 
 export const useAuth = () => {

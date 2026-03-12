@@ -7,6 +7,11 @@ import { useAuth } from '../../context/AuthContext';
 import type { User, Branch } from '../../types';
 
 const ROLES = ['SUPER_ADMIN', 'BRANCH_ADMIN', 'CASHIER'];
+const ROLE_LABELS: Record<string, string> = {
+  SUPER_ADMIN: 'ผู้ดูแลระบบสูงสุด',
+  BRANCH_ADMIN: 'ผู้จัดการสาขา',
+  CASHIER: 'แคชเชียร์',
+};
 const EMPTY = { username: '', password: '', name: '', role: 'CASHIER', branchId: '', active: true };
 
 export default function Users() {
@@ -24,7 +29,7 @@ export default function Users() {
   const load = async () => {
     setLoading(true);
     try { const { data } = await client.get('/users'); setUsers(data); }
-    catch { toast.error('Failed to load users'); }
+    catch { toast.error('โหลดข้อมูลผู้ใช้ไม่สำเร็จ'); }
     finally { setLoading(false); }
   };
 
@@ -45,19 +50,19 @@ export default function Users() {
     try {
       const payload: any = { ...form };
       if (!payload.password) delete payload.password;
-      if (editing) { await client.put(`/users/${editing.id}`, payload); toast.success('User updated'); }
-      else { await client.post('/users', payload); toast.success('User created'); }
+      if (editing) { await client.put(`/users/${editing.id}`, payload); toast.success('อัพเดทผู้ใช้เรียบร้อย'); }
+      else { await client.post('/users', payload); toast.success('เพิ่มผู้ใช้เรียบร้อย'); }
       setShowModal(false);
       load();
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Save failed');
+      toast.error(err.response?.data?.error || 'บันทึกไม่สำเร็จ');
     } finally { setSaving(false); }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this user?')) return;
-    try { await client.delete(`/users/${id}`); toast.success('Deleted'); load(); }
-    catch (err: any) { toast.error(err.response?.data?.error || 'Delete failed'); }
+    if (!confirm('ลบผู้ใช้นี้?')) return;
+    try { await client.delete(`/users/${id}`); toast.success('ลบเรียบร้อย'); load(); }
+    catch (err: any) { toast.error(err.response?.data?.error || 'ลบไม่สำเร็จ'); }
   };
 
   const roleBadge = (role: string) => {
@@ -69,15 +74,18 @@ export default function Users() {
     return `badge ${map[role] || 'bg-gray-100 text-gray-500'}`;
   };
 
+  // Filter out system POS users from display
+  const displayUsers = users.filter((u) => !u.isSystem);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-2">
           <UsersIcon className="text-blue-600" size={22} />
-          <h1 className="text-xl font-bold text-gray-800">Users</h1>
+          <h1 className="text-xl font-bold text-gray-800">จัดการผู้ใช้</h1>
         </div>
         <button onClick={openAdd} className="btn-primary flex items-center gap-1">
-          <Plus size={16} /> Add User
+          <Plus size={16} /> เพิ่มผู้ใช้
         </button>
       </div>
 
@@ -86,28 +94,28 @@ export default function Users() {
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
-                <th className="table-header">Name</th>
-                <th className="table-header">Username</th>
-                <th className="table-header">Role</th>
-                <th className="table-header">Branch</th>
-                <th className="table-header">Status</th>
-                <th className="table-header text-right">Actions</th>
+                <th className="table-header">ชื่อ</th>
+                <th className="table-header">ชื่อล็อกอิน</th>
+                <th className="table-header">บทบาท</th>
+                <th className="table-header">สาขา</th>
+                <th className="table-header">สถานะ</th>
+                <th className="table-header text-right">จัดการ</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={6} className="p-8 text-center text-gray-400">Loading…</td></tr>
-              ) : users.length === 0 ? (
-                <tr><td colSpan={6} className="p-8 text-center text-gray-400">No users</td></tr>
-              ) : users.map((u) => (
+                <tr><td colSpan={6} className="p-8 text-center text-gray-400">กำลังโหลด...</td></tr>
+              ) : displayUsers.length === 0 ? (
+                <tr><td colSpan={6} className="p-8 text-center text-gray-400">ยังไม่มีผู้ใช้</td></tr>
+              ) : displayUsers.map((u) => (
                 <tr key={u.id} className="hover:bg-gray-50">
                   <td className="table-cell font-medium">{u.name}</td>
                   <td className="table-cell font-mono text-gray-500">{u.username}</td>
-                  <td className="table-cell"><span className={roleBadge(u.role)}>{u.role.replace('_', ' ')}</span></td>
+                  <td className="table-cell"><span className={roleBadge(u.role)}>{ROLE_LABELS[u.role] || u.role}</span></td>
                   <td className="table-cell text-gray-500">{u.branch?.name || '—'}</td>
                   <td className="table-cell">
                     <span className={`badge ${u.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                      {u.active ? 'Active' : 'Inactive'}
+                      {u.active ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}
                     </span>
                   </td>
                   <td className="table-cell text-right">
@@ -123,41 +131,49 @@ export default function Users() {
             </tbody>
           </table>
         </div>
-        <div className="px-4 py-2 border-t text-xs text-gray-400">{users.length} users</div>
+        <div className="px-4 py-2 border-t text-xs text-gray-400">{displayUsers.length} ผู้ใช้</div>
       </div>
 
       {showModal && (
-        <Modal title={editing ? 'Edit User' : 'Add User'} onClose={() => setShowModal(false)}>
+        <Modal title={editing ? 'แก้ไขผู้ใช้' : 'เพิ่มผู้ใช้'} onClose={() => setShowModal(false)}>
           <form onSubmit={handleSave} className="space-y-3">
-            <div><label className="label">Full Name *</label><input required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="input" /></div>
-            <div><label className="label">Username *</label><input required disabled={!!editing} value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} className="input disabled:bg-gray-50" /></div>
             <div>
-              <label className="label">{editing ? 'New Password (leave blank to keep)' : 'Password *'}</label>
+              <label className="label">ชื่อ-นามสกุล *</label>
+              <input required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="input" placeholder="ชื่อผู้ใช้งาน" />
+            </div>
+            <div>
+              <label className="label">ชื่อล็อกอิน *</label>
+              <input required disabled={!!editing} value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} className="input disabled:bg-gray-50" placeholder="username" />
+            </div>
+            <div>
+              <label className="label">{editing ? 'รหัสผ่านใหม่ (เว้นว่างหากไม่เปลี่ยน)' : 'รหัสผ่าน *'}</label>
               <input type="password" required={!editing} value={form.password}
-                onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} className="input" />
+                onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} className="input" placeholder="รหัสผ่าน" />
             </div>
             {me?.role === 'SUPER_ADMIN' && (
-              <div><label className="label">Role</label>
+              <div>
+                <label className="label">บทบาท</label>
                 <select value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))} className="input">
-                  {ROLES.map((r) => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}
+                  {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
                 </select>
               </div>
             )}
-            <div><label className="label">Branch</label>
+            <div>
+              <label className="label">สาขา</label>
               <select value={form.branchId} onChange={(e) => setForm((f) => ({ ...f, branchId: e.target.value }))} className="input">
-                <option value="">— No Branch —</option>
+                <option value="">— ไม่ระบุสาขา —</option>
                 {branches.map((b) => <option key={b.id} value={b.id}>{b.name} ({b.code})</option>)}
               </select>
             </div>
             {editing && (
               <div className="flex items-center gap-2">
                 <input type="checkbox" id="user-active" checked={form.active} onChange={(e) => setForm((f) => ({ ...f, active: e.target.checked }))} />
-                <label htmlFor="user-active" className="text-sm">Active</label>
+                <label htmlFor="user-active" className="text-sm">เปิดใช้งาน</label>
               </div>
             )}
             <div className="flex gap-2 pt-2">
-              <button type="submit" disabled={saving} className="btn-primary flex-1">{saving ? 'Saving…' : 'Save'}</button>
-              <button type="button" onClick={() => setShowModal(false)} className="btn-secondary flex-1">Cancel</button>
+              <button type="submit" disabled={saving} className="btn-primary flex-1">{saving ? 'กำลังบันทึก...' : 'บันทึก'}</button>
+              <button type="button" onClick={() => setShowModal(false)} className="btn-secondary flex-1">ยกเลิก</button>
             </div>
           </form>
         </Modal>

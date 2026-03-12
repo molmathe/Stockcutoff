@@ -7,6 +7,7 @@ import { upload } from '../middleware/upload';
 
 const router = Router();
 
+// Get all items
 router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { search, category, active } = req.query;
@@ -27,47 +28,118 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
   }
 });
 
+// Get by barcode — must be before /:id pattern routes
 router.get('/barcode/:barcode', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const item = await prisma.item.findUnique({ where: { barcode: req.params.barcode } });
-    if (!item || !item.active) return res.status(404).json({ error: 'Item not found' });
+    if (!item || !item.active) return res.status(404).json({ error: 'ไม่พบสินค้า' });
     res.json(item);
   } catch {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
+// Get categories from Category table
 router.get('/categories', authenticate, async (_req, res: Response) => {
   try {
-    const cats = await prisma.item.findMany({
-      where: { category: { not: null } },
-      select: { category: true },
-      distinct: ['category'],
-    });
-    res.json(cats.map((c) => c.category).filter(Boolean));
+    const cats = await prisma.category.findMany({ orderBy: { name: 'asc' }, select: { name: true } });
+    res.json(cats.map((c) => c.name));
   } catch {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
+// Create item
 router.post('/', authenticate, requireAdmin, upload.single('image'), async (req: AuthRequest, res: Response) => {
   try {
     const { sku, barcode, name, description, defaultPrice, category } = req.body;
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
     const item = await prisma.item.create({
-      data: { sku, barcode, name, description, defaultPrice: parseFloat(defaultPrice), category, imageUrl },
+      data: { sku, barcode, name, description, defaultPrice: parseFloat(defaultPrice), category: category || null, imageUrl },
     });
     res.status(201).json(item);
   } catch (err: any) {
-    if (err.code === 'P2002') return res.status(400).json({ error: 'SKU or barcode already exists' });
+    if (err.code === 'P2002') return res.status(400).json({ error: 'SKU หรือบาร์โค้ดซ้ำ' });
     res.status(500).json({ error: 'Server error' });
   }
 });
 
+// Bulk delete — must be before /:id
+router.delete('/bulk', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { ids } = req.body;
+    await prisma.item.deleteMany({ where: { id: { in: ids } } });
+    res.json({ message: `ลบ ${ids.length} สินค้า` });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Bulk CSV import — must be before /:id
+router.post('/bulk-import', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { items } = req.body as { items: any[] };
+    let created = 0, updated = 0;
+    const errors: string[] = [];
+    for (const it of items) {
+      try {
+        const existing = await prisma.item.findUnique({ where: { sku: it.sku } });
+        await prisma.item.upsert({
+          where: { sku: it.sku },
+          update: { barcode: it.barcode, name: it.name, description: it.description || null, defaultPrice: parseFloat(it.defaultPrice), category: it.category || null },
+          create: { sku: it.sku, barcode: it.barcode, name: it.name, description: it.description || null, defaultPrice: parseFloat(it.defaultPrice), category: it.category || null },
+        });
+        if (existing) updated++; else created++;
+      } catch (e: any) {
+        errors.push(`SKU ${it.sku}: ${e.message}`);
+      }
+    }
+    res.json({ message: `นำเข้าเรียบร้อย: สร้าง ${created}, อัพเดท ${updated}`, created, updated, errors });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Server error' });
+  }
+});
+
+// Bulk image upload matched by barcode filename — must be before /:id
+router.post('/bulk-images', authenticate, requireAdmin, upload.array('images', 100), async (req: AuthRequest, res: Response) => {
+  try {
+    const files = req.files as Express.Multer.File[];
+    if (!files || files.length === 0) return res.status(400).json({ error: 'ไม่มีไฟล์รูปภาพ' });
+
+    const matched: { barcode: string; name: string; imageUrl: string }[] = [];
+    const unmatched: string[] = [];
+
+    for (const file of files) {
+      const barcode = path.basename(file.originalname, path.extname(file.originalname)).trim();
+      const item = await prisma.item.findUnique({ where: { barcode } });
+
+      if (item) {
+        // Delete old image
+        if (item.imageUrl) {
+          const oldPath = path.join(__dirname, '../../uploads', path.basename(item.imageUrl));
+          if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+        }
+        const imageUrl = `/uploads/${file.filename}`;
+        await prisma.item.update({ where: { id: item.id }, data: { imageUrl } });
+        matched.push({ barcode, name: item.name, imageUrl });
+      } else {
+        // Remove unmatched uploaded file
+        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+        unmatched.push(file.originalname);
+      }
+    }
+
+    res.json({ matched, unmatched, total: files.length });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Update item
 router.put('/:id', authenticate, requireAdmin, upload.single('image'), async (req: AuthRequest, res: Response) => {
   try {
     const existing = await prisma.item.findUnique({ where: { id: req.params.id } });
-    if (!existing) return res.status(404).json({ error: 'Item not found' });
+    if (!existing) return res.status(404).json({ error: 'ไม่พบสินค้า' });
 
     let imageUrl = existing.imageUrl;
     if (req.file) {
@@ -84,58 +156,31 @@ router.put('/:id', authenticate, requireAdmin, upload.single('image'), async (re
       data: {
         sku, barcode, name, description,
         defaultPrice: parseFloat(defaultPrice),
-        category, imageUrl,
+        category: category || null,
+        imageUrl,
         active: active !== undefined ? (active === 'true' || active === true) : undefined,
       },
     });
     res.json(item);
   } catch (err: any) {
-    if (err.code === 'P2002') return res.status(400).json({ error: 'SKU or barcode already exists' });
+    if (err.code === 'P2002') return res.status(400).json({ error: 'SKU หรือบาร์โค้ดซ้ำ' });
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-router.delete('/bulk', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
-  try {
-    const { ids } = req.body;
-    await prisma.item.deleteMany({ where: { id: { in: ids } } });
-    res.json({ message: `${ids.length} items deleted` });
-  } catch {
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
+// Delete single item
 router.delete('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const item = await prisma.item.findUnique({ where: { id: req.params.id } });
-    if (!item) return res.status(404).json({ error: 'Item not found' });
+    if (!item) return res.status(404).json({ error: 'ไม่พบสินค้า' });
     if (item.imageUrl) {
       const imgPath = path.join(__dirname, '../../uploads', path.basename(item.imageUrl));
       if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
     }
     await prisma.item.delete({ where: { id: req.params.id } });
-    res.json({ message: 'Deleted' });
+    res.json({ message: 'ลบเรียบร้อย' });
   } catch {
     res.status(500).json({ error: 'Server error' });
-  }
-});
-
-router.post('/bulk-import', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
-  try {
-    const { items } = req.body as { items: any[] };
-    let created = 0, updated = 0;
-    for (const it of items) {
-      await prisma.item.upsert({
-        where: { sku: it.sku },
-        update: { barcode: it.barcode, name: it.name, description: it.description, defaultPrice: parseFloat(it.defaultPrice), category: it.category },
-        create: { sku: it.sku, barcode: it.barcode, name: it.name, description: it.description, defaultPrice: parseFloat(it.defaultPrice), category: it.category },
-      }).then((r) => {
-        if (r.createdAt.getTime() === r.updatedAt.getTime()) created++; else updated++;
-      });
-    }
-    res.json({ message: `Imported ${items.length} items`, created, updated });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Server error' });
   }
 });
 

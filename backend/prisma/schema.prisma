@@ -19,6 +19,13 @@ enum BillStatus {
   CANCELLED
 }
 
+model Category {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model User {
   id        String   @id @default(cuid())
   username  String   @unique
@@ -28,6 +35,7 @@ model User {
   branchId  String?
   branch    Branch?  @relation(fields: [branchId], references: [id])
   active    Boolean  @default(true)
+  isSystem  Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   bills     Bill[]
@@ -39,6 +47,7 @@ model Branch {
   code      String   @unique
   address   String?
   phone     String?
+  pincode   String?  @unique
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

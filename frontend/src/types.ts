@@ -1,3 +1,10 @@
+export interface Category {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Branch {
   id: string;
   name: string;
@@ -5,6 +12,7 @@ export interface Branch {
   address: string | null;
   phone: string | null;
   active: boolean;
+  hasPincode?: boolean;
   createdAt: string;
 }
 
@@ -16,6 +24,8 @@ export interface User {
   branchId: string | null;
   branch: Branch | null;
   active: boolean;
+  isSystem?: boolean;
+  posMode?: boolean;
   createdAt: string;
 }
 
@@ -35,7 +45,7 @@ export interface Item {
 export interface BillItem {
   id: string;
   itemId: string;
-  item: Pick<Item, 'id' | 'name' | 'sku' | 'barcode' | 'imageUrl'>;
+  item?: Pick<Item, 'id' | 'name' | 'sku' | 'barcode' | 'imageUrl'> | null;
   quantity: number;
   price: string;
   discount: string;
@@ -57,4 +67,14 @@ export interface Bill {
   createdAt: string;
   submittedAt: string | null;
   items: BillItem[];
+}
+
+export interface TodaySummary {
+  totalBills: number;
+  openBills: number;
+  submittedBills: number;
+  totalRevenue: number;
+  openRevenue: number;
+  totalItems: number;
+  bills: Bill[];
 }
