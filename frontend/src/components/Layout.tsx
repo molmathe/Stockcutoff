@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import pkg from '../../package.json';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -52,8 +53,9 @@ export default function Layout() {
         <div className="flex items-center gap-2.5 h-14 px-4 border-b border-gray-200 shrink-0">
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-xs font-bold text-white">SC</div>
           <div className="leading-tight">
-            <p className="font-bold text-sm text-gray-900">StockCutoff</p>
+            <p className="font-bold text-sm text-gray-900">Fonney StockCutoff</p>
             <p className="text-[10px] text-gray-400">POS &amp; Inventory</p>
+            <p className="text-[9px] text-gray-300">v{pkg.version}</p>
           </div>
           <button className="ml-auto md:hidden text-gray-400 hover:text-gray-700" onClick={() => setOpen(false)}>
             <X size={18} />

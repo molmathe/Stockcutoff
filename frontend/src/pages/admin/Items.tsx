@@ -37,11 +37,28 @@ export default function Items() {
   // Bulk image drag-drop state
   const [dragOver, setDragOver] = useState(false);
   const [bulkImages, setBulkImages] = useState<File[]>([]);
-  const [bulkResult, setBulkResult] = useState<{ matched: string[]; unmatched: string[] } | null>(null);
+  const [bulkResult, setBulkResult] = useState<{
+    matched: { barcode: string; name: string; imageUrl: string }[];
+    unmatched: string[];
+  } | null>(null);
   const [uploadingImages, setUploadingImages] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0); // 0–100 upload bytes; 100 = server processing
   const bulkImageInputRef = useRef<HTMLInputElement>(null);
+  const dragEnterCount = useRef(0);
 
   useEffect(() => { loadItems(); loadCategories(); }, []);
+
+  // Prevent browser from navigating to dropped files when dropped outside the drop zone
+  useEffect(() => {
+    if (!showBulkImage) return;
+    const prevent = (e: DragEvent) => { e.preventDefault(); e.stopPropagation(); };
+    window.addEventListener('dragover', prevent);
+    window.addEventListener('drop', prevent);
+    return () => {
+      window.removeEventListener('dragover', prevent);
+      window.removeEventListener('drop', prevent);
+    };
+  }, [showBulkImage]);
 
   const loadItems = async () => {
     setLoading(true);
@@ -140,13 +157,24 @@ export default function Items() {
 
   // Drag-drop handlers
   const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault(); setDragOver(true);
+    e.preventDefault();
   }, []);
 
-  const handleDragLeave = useCallback(() => setDragOver(false), []);
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    dragEnterCount.current += 1;
+    setDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback(() => {
+    dragEnterCount.current -= 1;
+    if (dragEnterCount.current === 0) setDragOver(false);
+  }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
+    dragEnterCount.current = 0;
     setDragOver(false);
     const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('image/'));
     if (files.length === 0) { toast.error('กรุณาวางไฟล์รูปภาพเท่านั้น'); return; }
@@ -163,18 +191,28 @@ export default function Items() {
   const handleBulkUpload = async () => {
     if (bulkImages.length === 0) return;
     setUploadingImages(true);
+    setUploadProgress(0);
     try {
       const fd = new FormData();
       bulkImages.forEach((f) => fd.append('images', f));
       const { data } = await client.post('/items/bulk-images', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (e) => {
+          // cap at 95 — the remaining 5 % is server-side processing
+          const pct = e.total ? Math.round((e.loaded / e.total) * 95) : 0;
+          setUploadProgress(pct);
+        },
       });
+      setUploadProgress(100);
       setBulkResult(data);
       toast.success(`จับคู่สำเร็จ ${data.matched.length} รายการ`);
       if (data.matched.length > 0) loadItems();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'อัพโหลดรูปภาพไม่สำเร็จ');
-    } finally { setUploadingImages(false); }
+    } finally {
+      setUploadingImages(false);
+      setUploadProgress(0);
+    }
   };
 
   const toggleSelect = (id: string) =>
@@ -383,6 +421,7 @@ export default function Items() {
             {/* Drop zone */}
             <div
               onDragOver={handleDragOver}
+              onDragEnter={handleDragEnter}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
               onClick={() => bulkImageInputRef.current?.click()}
@@ -418,6 +457,27 @@ export default function Items() {
               </div>
             )}
 
+            {/* Upload progress bar */}
+            {uploadingImages && (
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-xs text-gray-500">
+                  <span>{uploadProgress < 100 ? `กำลังอัพโหลด... ${uploadProgress}%` : 'เซิร์ฟเวอร์กำลังประมวลผล...'}</span>
+                  <span>{uploadProgress}%</span>
+                </div>
+                <div className="w-full h-2.5 bg-gray-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-300"
+                    style={{
+                      width: `${uploadProgress}%`,
+                      background: uploadProgress < 100
+                        ? 'linear-gradient(90deg, #3b82f6, #60a5fa)'
+                        : 'linear-gradient(90deg, #10b981, #34d399)',
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
             {bulkResult && (
               <div className="space-y-2">
                 <div className="bg-green-50 border border-green-200 rounded-lg p-3">
@@ -426,7 +486,9 @@ export default function Items() {
                   </p>
                   <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
                     {bulkResult.matched.map((b) => (
-                      <span key={b} className="text-xs bg-green-100 text-green-700 rounded px-1.5 py-0.5 font-mono">{b}</span>
+                      <span key={b.barcode} className="text-xs bg-green-100 text-green-700 rounded px-1.5 py-0.5 font-mono">
+                        {b.barcode} — {b.name}
+                      </span>
                     ))}
                   </div>
                 </div>
@@ -451,7 +513,11 @@ export default function Items() {
                 disabled={uploadingImages || bulkImages.length === 0}
                 className="btn-primary flex-1 flex items-center justify-center gap-2"
               >
-                {uploadingImages ? 'กำลังอัพโหลด...' : `อัพโหลด ${bulkImages.length} รูปภาพ`}
+                {uploadingImages
+                  ? uploadProgress < 100
+                    ? `กำลังอัพโหลด ${uploadProgress}%`
+                    : 'กำลังประมวลผล...'
+                  : `อัพโหลด ${bulkImages.length} รูปภาพ`}
               </button>
               <button onClick={() => setShowBulkImage(false)} className="btn-secondary flex-1">ปิด</button>
             </div>

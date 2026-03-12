@@ -1,6 +1,14 @@
-# StockCutoff POS System
+# Fonney StockCutoff POS System
 
 Full-stack Point-of-Sale and inventory management web app.
+
+## Changelog
+
+### v0.3.1
+- **Branding** — renamed to *Fonney StockCutoff*; version badge shown in sidebar
+- **Drag-drop image mapping** — fixed blank-page bug when files dropped outside zone; fixed result display showing `[object Object]`; fixed highlight flicker on child elements; added real-time upload progress bar (bytes transferred + server processing phase)
+- **Security hardening** — JWT secret validation at startup; rate limiting on login & API routes; privilege-escalation guard on user updates; atomic DB transactions for category rename/delete; Thai-timezone correct day boundaries; negative-total guard; input validation across all routes; row/result caps (DoS prevention)
+- **POS 401 redirect** — cashier sessions now redirect to `/pos-login` instead of `/login`
 
 ## Features
 
