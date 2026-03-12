@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, Users as UsersIcon } from 'lucide-react';
 import client from '../../api/client';
@@ -15,27 +16,40 @@ const ROLE_LABELS: Record<string, string> = {
 const EMPTY = { username: '', password: '', name: '', role: 'CASHIER', branchId: '', active: true };
 
 export default function Users() {
+  const qc = useQueryClient();
   const { user: me } = useAuth();
-  const [users, setUsers] = useState<User[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [loading, setLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
   const [form, setForm] = useState<typeof EMPTY>({ ...EMPTY });
-  const [saving, setSaving] = useState(false);
 
-  useEffect(() => { load(); loadBranches(); }, []);
+  const { data: users = [], isLoading: loading } = useQuery<User[]>({
+    queryKey: ['users'],
+    queryFn: () => client.get('/users').then((r) => r.data),
+  });
 
-  const load = async () => {
-    setLoading(true);
-    try { const { data } = await client.get('/users'); setUsers(data); }
-    catch { toast.error('โหลดข้อมูลผู้ใช้ไม่สำเร็จ'); }
-    finally { setLoading(false); }
-  };
+  const { data: branches = [] } = useQuery<Branch[]>({
+    queryKey: ['branches'],
+    queryFn: () => client.get('/branches').then((r) => r.data),
+  });
 
-  const loadBranches = async () => {
-    try { const { data } = await client.get('/branches'); setBranches(data); } catch {}
-  };
+  const saveMutation = useMutation({
+    mutationFn: (payload: any) =>
+      editing
+        ? client.put(`/users/${editing.id}`, payload)
+        : client.post('/users', payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+      setShowModal(false);
+      toast.success(editing ? 'อัพเดทผู้ใช้เรียบร้อย' : 'เพิ่มผู้ใช้เรียบร้อย');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error || 'บันทึกไม่สำเร็จ'),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => client.delete(`/users/${id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); toast.success('ลบเรียบร้อย'); },
+    onError: (err: any) => toast.error(err.response?.data?.error || 'ลบไม่สำเร็จ'),
+  });
 
   const openAdd = () => { setEditing(null); setForm({ ...EMPTY }); setShowModal(true); };
   const openEdit = (u: User) => {
@@ -44,26 +58,19 @@ export default function Users() {
     setShowModal(true);
   };
 
-  const handleSave = async (e: React.FormEvent) => {
+  const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    setSaving(true);
-    try {
-      const payload: any = { ...form };
-      if (!payload.password) delete payload.password;
-      if (editing) { await client.put(`/users/${editing.id}`, payload); toast.success('อัพเดทผู้ใช้เรียบร้อย'); }
-      else { await client.post('/users', payload); toast.success('เพิ่มผู้ใช้เรียบร้อย'); }
-      setShowModal(false);
-      load();
-    } catch (err: any) {
-      toast.error(err.response?.data?.error || 'บันทึกไม่สำเร็จ');
-    } finally { setSaving(false); }
+    const payload: any = { ...form };
+    if (!payload.password) delete payload.password;
+    saveMutation.mutate(payload);
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string) => {
     if (!confirm('ลบผู้ใช้นี้?')) return;
-    try { await client.delete(`/users/${id}`); toast.success('ลบเรียบร้อย'); load(); }
-    catch (err: any) { toast.error(err.response?.data?.error || 'ลบไม่สำเร็จ'); }
+    deleteMutation.mutate(id);
   };
+
+  const saving = saveMutation.isPending;
 
   const roleBadge = (role: string) => {
     const map: Record<string, string> = {

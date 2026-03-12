@@ -76,6 +76,10 @@ model Item {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   billItems    BillItem[]
+
+  @@index([category, active])
+  @@index([active])
+  @@index([name])
 }
 
 model Bill {
@@ -96,6 +100,10 @@ model Bill {
   updatedAt   DateTime   @updatedAt
   submittedAt DateTime?
   items       BillItem[]
+
+  @@index([branchId, status, createdAt])
+  @@index([status, createdAt])
+  @@index([saleDate])
 }
 
 model BillItem {
@@ -108,6 +116,9 @@ model BillItem {
   price    Decimal @db.Decimal(10, 2)
   discount Decimal @db.Decimal(10, 2) @default(0)
   subtotal Decimal @db.Decimal(10, 2)
+
+  @@index([billId])
+  @@index([itemId])
 }
 
 model ReportTemplate {

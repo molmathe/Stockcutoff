@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, Tag } from 'lucide-react';
 import client from '../../api/client';
@@ -6,56 +7,64 @@ import Modal from '../../components/Modal';
 import type { Category } from '../../types';
 
 export default function Categories() {
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(false);
+  const qc = useQueryClient();
   const [selected, setSelected] = useState<string[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Category | null>(null);
   const [name, setName] = useState('');
-  const [saving, setSaving] = useState(false);
 
-  useEffect(() => { load(); }, []);
+  const { data: categories = [], isLoading } = useQuery<Category[]>({
+    queryKey: ['categories'],
+    queryFn: () => client.get('/categories').then((r) => r.data),
+  });
 
-  const load = async () => {
-    setLoading(true);
-    try { const { data } = await client.get('/categories'); setCategories(data); }
-    catch { toast.error('โหลดหมวดหมู่ไม่สำเร็จ'); }
-    finally { setLoading(false); }
-  };
+  const saveMutation = useMutation({
+    mutationFn: (trimmedName: string) =>
+      editing
+        ? client.put(`/categories/${editing.id}`, { name: trimmedName })
+        : client.post('/categories', { name: trimmedName }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['categories'] });
+      qc.invalidateQueries({ queryKey: ['items'] });
+      setShowModal(false);
+      toast.success(editing ? 'อัพเดทหมวดหมู่เรียบร้อย — ชื่อสินค้าที่ใช้หมวดหมู่นี้ถูกซิงค์แล้ว' : 'เพิ่มหมวดหมู่เรียบร้อย');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error || 'บันทึกไม่สำเร็จ'),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => client.delete(`/categories/${id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['categories'] }); toast.success('ลบเรียบร้อย'); },
+    onError: (err: any) => toast.error(err.response?.data?.error || 'ลบไม่สำเร็จ'),
+  });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: (ids: string[]) => client.delete('/categories/bulk', { data: { ids } }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['categories'] }); setSelected([]); toast.success('ลบเรียบร้อย'); },
+    onError: () => toast.error('ลบหลายรายการไม่สำเร็จ'),
+  });
 
   const openAdd = () => { setEditing(null); setName(''); setShowModal(true); };
   const openEdit = (c: Category) => { setEditing(c); setName(c.name); setShowModal(true); };
 
-  const handleSave = async (e: React.FormEvent) => {
+  const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    setSaving(true);
-    try {
-      if (editing) {
-        await client.put(`/categories/${editing.id}`, { name: name.trim() });
-        toast.success('อัพเดทหมวดหมู่เรียบร้อย — ชื่อสินค้าที่ใช้หมวดหมู่นี้ถูกซิงค์แล้ว');
-      } else {
-        await client.post('/categories', { name: name.trim() });
-        toast.success('เพิ่มหมวดหมู่เรียบร้อย');
-      }
-      setShowModal(false);
-      load();
-    } catch (err: any) {
-      toast.error(err.response?.data?.error || 'บันทึกไม่สำเร็จ');
-    } finally { setSaving(false); }
+    saveMutation.mutate(name.trim());
   };
 
-  const handleDelete = async (id: string, catName: string) => {
+  const handleDelete = (id: string, catName: string) => {
     if (!confirm(`ลบหมวดหมู่ "${catName}"? สินค้าที่ใช้หมวดหมู่นี้จะถูกเปลี่ยนเป็นไม่มีหมวดหมู่`)) return;
-    try { await client.delete(`/categories/${id}`); toast.success('ลบเรียบร้อย'); load(); }
-    catch (err: any) { toast.error(err.response?.data?.error || 'ลบไม่สำเร็จ'); }
+    deleteMutation.mutate(id);
   };
 
-  const handleBulkDelete = async () => {
+  const handleBulkDelete = () => {
     if (!confirm(`ลบ ${selected.length} หมวดหมู่? สินค้าที่ใช้หมวดหมู่เหล่านี้จะถูกเปลี่ยนเป็นไม่มีหมวดหมู่`)) return;
-    try { await client.delete('/categories/bulk', { data: { ids: selected } }); toast.success('ลบเรียบร้อย'); setSelected([]); load(); }
-    catch { toast.error('ลบหลายรายการไม่สำเร็จ'); }
+    bulkDeleteMutation.mutate(selected);
   };
+
+  const loading = isLoading;
+  const saving = saveMutation.isPending;
 
   const toggleSelect = (id: string) => setSelected((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
   const toggleAll = () => setSelected(selected.length === categories.length ? [] : categories.map((c) => c.id));

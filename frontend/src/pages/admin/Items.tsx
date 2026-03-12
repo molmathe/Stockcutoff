@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Plus, Pencil, Trash2, Upload, Download, Search, Package, Images, X, FileDown } from 'lucide-react';
+import { Plus, Pencil, Trash2, Upload, Download, Search, Package, Images, X, FileDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import client from '../../api/client';
 import Modal from '../../components/Modal';
 import type { Item, Category } from '../../types';
@@ -43,10 +44,16 @@ const exportCsv = (rows: Item[], filename: string) => {
   URL.revokeObjectURL(a.href);
 };
 
+const LIMIT = 50;
+
 export default function Items() {
-  const [items, setItems] = useState<Item[]>([]);
-  const [loading, setLoading] = useState(false);
+  const qc = useQueryClient();
+
+  // Search: input vs committed param
   const [search, setSearch] = useState('');
+  const [searchParam, setSearchParam] = useState('');
+  const [page, setPage] = useState(1);
+
   const [selected, setSelected] = useState<string[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -55,8 +62,6 @@ export default function Items() {
   const [form, setForm] = useState({ ...EMPTY });
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [importText, setImportText] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [categories, setCategories] = useState<Category[]>([]);
 
   // Bulk image drag-drop state
   const [dragOver, setDragOver] = useState(false);
@@ -66,14 +71,12 @@ export default function Items() {
     unmatched: string[];
   } | null>(null);
   const [uploadingImages, setUploadingImages] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0); // 0–100 upload bytes; 100 = server processing
+  const [uploadProgress, setUploadProgress] = useState(0);
   const bulkImageInputRef = useRef<HTMLInputElement>(null);
   const dragEnterCount = useRef(0);
 
-  useEffect(() => { loadItems(); loadCategories(); }, []);
-
   // Prevent browser from navigating to dropped files when dropped outside the drop zone
-  useEffect(() => {
+  React.useEffect(() => {
     if (!showBulkImage) return;
     const prevent = (e: DragEvent) => { e.preventDefault(); e.stopPropagation(); };
     window.addEventListener('dragover', prevent);
@@ -84,18 +87,68 @@ export default function Items() {
     };
   }, [showBulkImage]);
 
-  const loadItems = async () => {
-    setLoading(true);
-    try {
-      const { data } = await client.get('/items', { params: search ? { search } : {} });
-      setItems(data);
-    } catch { toast.error('โหลดข้อมูลสินค้าไม่สำเร็จ'); }
-    finally { setLoading(false); }
-  };
+  // Items query with pagination
+  const { data: pageData, isLoading: loading } = useQuery({
+    queryKey: ['items', searchParam, page],
+    queryFn: () =>
+      client.get('/items', {
+        params: { page, limit: LIMIT, ...(searchParam ? { search: searchParam } : {}) },
+      }).then((r) => r.data as { items: Item[]; total: number; page: number; limit: number; pages: number }),
+    placeholderData: (prev) => prev,
+  });
 
-  const loadCategories = async () => {
-    try { const { data } = await client.get('/categories'); setCategories(data); } catch {}
-  };
+  const items: Item[] = pageData?.items ?? [];
+  const totalPages = pageData?.pages ?? 1;
+  const totalItems = pageData?.total ?? 0;
+
+  // Categories query (shared cache with Categories page)
+  const { data: categories = [] } = useQuery<Category[]>({
+    queryKey: ['categories'],
+    queryFn: () => client.get('/categories').then((r) => r.data),
+  });
+
+  const handleSearch = () => { setPage(1); setSearchParam(search); };
+
+  // Mutations
+  const saveMutation = useMutation({
+    mutationFn: (fd: FormData) =>
+      editing
+        ? client.put(`/items/${editing.id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+        : client.post('/items', fd, { headers: { 'Content-Type': 'multipart/form-data' } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['items'] });
+      setShowModal(false);
+      toast.success(editing ? 'อัพเดทสินค้าเรียบร้อย' : 'เพิ่มสินค้าเรียบร้อย');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error || 'บันทึกไม่สำเร็จ'),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => client.delete(`/items/${id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['items'] }); toast.success('ลบเรียบร้อย'); },
+    onError: () => toast.error('ลบไม่สำเร็จ'),
+  });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: (ids: string[]) => client.delete('/items/bulk', { data: { ids } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['items'] });
+      setSelected([]);
+      toast.success('ลบเรียบร้อย');
+    },
+    onError: () => toast.error('ลบหลายรายการไม่สำเร็จ'),
+  });
+
+  const importMutation = useMutation({
+    mutationFn: (rows: any[]) => client.post('/items/bulk-import', { items: rows }),
+    onSuccess: ({ data }) => {
+      qc.invalidateQueries({ queryKey: ['items'] });
+      toast.success(data.message);
+      setShowImport(false);
+      setImportText('');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error || 'นำเข้าไม่สำเร็จ'),
+  });
 
   const openAdd = () => { setEditing(null); setForm({ ...EMPTY }); setImageFile(null); setShowModal(true); };
   const openEdit = (item: Item) => {
@@ -109,42 +162,25 @@ export default function Items() {
     setShowModal(true);
   };
 
-  const handleSave = async (e: React.FormEvent) => {
+  const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    setSaving(true);
-    try {
-      const fd = new FormData();
-      Object.entries(form).forEach(([k, v]) => v !== undefined && fd.append(k, String(v)));
-      if (imageFile) fd.append('image', imageFile);
-      if (editing) {
-        await client.put(`/items/${editing.id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-        toast.success('อัพเดทสินค้าเรียบร้อย');
-      } else {
-        await client.post('/items', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-        toast.success('เพิ่มสินค้าเรียบร้อย');
-      }
-      setShowModal(false);
-      loadItems();
-    } catch (err: any) {
-      toast.error(err.response?.data?.error || 'บันทึกไม่สำเร็จ');
-    } finally { setSaving(false); }
+    const fd = new FormData();
+    Object.entries(form).forEach(([k, v]) => v !== undefined && fd.append(k, String(v)));
+    if (imageFile) fd.append('image', imageFile);
+    saveMutation.mutate(fd);
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string) => {
     if (!confirm('ลบสินค้านี้?')) return;
-    try { await client.delete(`/items/${id}`); toast.success('ลบเรียบร้อย'); loadItems(); }
-    catch { toast.error('ลบไม่สำเร็จ'); }
+    deleteMutation.mutate(id);
   };
 
-  const handleBulkDelete = async () => {
+  const handleBulkDelete = () => {
     if (!confirm(`ลบ ${selected.length} สินค้า?`)) return;
-    try {
-      await client.delete('/items/bulk', { data: { ids: selected } });
-      toast.success('ลบเรียบร้อย'); setSelected([]); loadItems();
-    } catch { toast.error('ลบหลายรายการไม่สำเร็จ'); }
+    bulkDeleteMutation.mutate(selected);
   };
 
-  const handleImport = async () => {
+  const handleImport = () => {
     const lines = importText.trim().split('\n').filter((l) => !l.trim().startsWith('#'));
     if (lines.length < 2) { toast.error('ไม่พบข้อมูลที่ถูกต้อง'); return; }
     const headers = lines[0].split(',').map((h) => h.trim());
@@ -155,15 +191,18 @@ export default function Items() {
       return obj;
     }).filter((r) => r.sku);
     if (rows.length === 0) { toast.error('ไม่พบข้อมูลที่ถูกต้อง'); return; }
-    setSaving(true);
-    try {
-      const { data } = await client.post('/items/bulk-import', { items: rows });
-      toast.success(data.message);
-      setShowImport(false); setImportText(''); loadItems();
-    } catch (err: any) {
-      toast.error(err.response?.data?.error || 'นำเข้าไม่สำเร็จ');
-    } finally { setSaving(false); }
+    importMutation.mutate(rows);
   };
+
+  // Export all items (fetches without pagination for complete dataset)
+  const handleExportAll = async () => {
+    try {
+      const { data } = await client.get('/items', { params: searchParam ? { search: searchParam } : {} });
+      exportCsv(data, `สินค้า-ทั้งหมด-${new Date().toISOString().slice(0, 10)}.csv`);
+    } catch { toast.error('ส่งออกไม่สำเร็จ'); }
+  };
+
+  const saving = saveMutation.isPending || importMutation.isPending;
 
   const downloadTemplate = () => {
     const csv = [
@@ -230,7 +269,7 @@ export default function Items() {
       setUploadProgress(100);
       setBulkResult(data);
       toast.success(`จับคู่สำเร็จ ${data.matched.length} รายการ`);
-      if (data.matched.length > 0) loadItems();
+      if (data.matched.length > 0) qc.invalidateQueries({ queryKey: ['items'] });
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'อัพโหลดรูปภาพไม่สำเร็จ');
     } finally {
@@ -241,7 +280,8 @@ export default function Items() {
 
   const toggleSelect = (id: string) =>
     setSelected((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
-  const toggleAll = () => setSelected(selected.length === items.length ? [] : items.map((i) => i.id));
+  const toggleAll = () =>
+    setSelected(selected.length === items.length && items.length > 0 ? [] : items.map((i) => i.id));
 
   return (
     <div className="space-y-4">
@@ -265,8 +305,8 @@ export default function Items() {
             </>
           )}
           <button
-            onClick={() => exportCsv(items, `สินค้า-ทั้งหมด-${new Date().toISOString().slice(0,10)}.csv`)}
-            disabled={items.length === 0}
+            onClick={handleExportAll}
+            disabled={totalItems === 0}
             className="btn-secondary flex items-center gap-1"
           >
             <Download size={16} /> ส่งออก CSV
@@ -290,10 +330,10 @@ export default function Items() {
           <div className="relative flex-1">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && loadItems()}
+              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
               placeholder="ค้นหาชื่อสินค้า, SKU หรือบาร์โค้ด…" className="input pl-9" />
           </div>
-          <button onClick={loadItems} className="btn-primary">ค้นหา</button>
+          <button onClick={handleSearch} className="btn-primary">ค้นหา</button>
         </div>
       </div>
 
@@ -373,7 +413,28 @@ export default function Items() {
             </tbody>
           </table>
         </div>
-        <div className="px-4 py-2 border-t text-xs text-gray-400">{items.length} สินค้า</div>
+        <div className="px-4 py-2 border-t flex items-center justify-between text-xs text-gray-400">
+          <span>{totalItems} สินค้า {searchParam && `(กรองแล้ว)`}</span>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="p-1 rounded hover:bg-gray-100 disabled:opacity-30"
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <span>หน้า {page} / {totalPages}</span>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className="p-1 rounded hover:bg-gray-100 disabled:opacity-30"
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Add/Edit Modal */}
@@ -591,8 +652,8 @@ export default function Items() {
               placeholder={'sku,barcode,name,description,defaultPrice,category\nITEM001,8850001234567,ตัวอย่างสินค้า,รายละเอียด,99.00,เครื่องดื่ม'}
             />
             <div className="flex gap-2">
-              <button onClick={handleImport} disabled={saving || !importText.trim()} className="btn-primary flex-1">
-                {saving ? 'กำลังนำเข้า...' : 'นำเข้า'}
+              <button onClick={handleImport} disabled={importMutation.isPending || !importText.trim()} className="btn-primary flex-1">
+                {importMutation.isPending ? 'กำลังนำเข้า...' : 'นำเข้า'}
               </button>
               <button onClick={() => setShowImport(false)} className="btn-secondary flex-1">ยกเลิก</button>
             </div>

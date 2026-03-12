@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts';
 import { TrendingUp, ShoppingBag, Package, Award } from 'lucide-react';
 import client from '../../api/client';
@@ -16,17 +17,12 @@ const fmt = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
 
 export default function Dashboard() {
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data, isLoading } = useQuery<DashboardData>({
+    queryKey: ['dashboard'],
+    queryFn: () => client.get('/reports/dashboard').then((r) => r.data),
+  });
 
-  useEffect(() => {
-    client.get('/reports/dashboard')
-      .then((r) => setData(r.data))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <div className="p-8 text-center text-gray-400">กำลังโหลดแดชบอร์ด...</div>;
+  if (isLoading) return <div className="p-8 text-center text-gray-400">กำลังโหลดแดชบอร์ด...</div>;
   if (!data) return <div className="p-8 text-center text-red-400">โหลดแดชบอร์ดไม่สำเร็จ</div>;
 
   const stats = [

@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { FileText, ChevronDown, ChevronUp, X } from 'lucide-react';
@@ -22,48 +23,44 @@ const statusLabel: Record<string, string> = {
 };
 
 export default function Bills() {
+  const qc = useQueryClient();
   const { user } = useAuth();
-  const [bills, setBills] = useState<Bill[]>([]);
-  const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [branches, setBranches] = useState<Branch[]>([]);
 
   const today = format(new Date(), 'yyyy-MM-dd');
-  const [filters, setFilters] = useState({ startDate: today, endDate: today, status: '', branchId: '' });
+  const defaultFilters = { startDate: today, endDate: today, status: '', branchId: '' };
+  const [filters, setFilters] = useState(defaultFilters);
+  const [searchParams, setSearchParams] = useState(defaultFilters);
 
   const isAdmin = user?.role !== 'CASHIER';
 
-  useEffect(() => {
-    if (isAdmin) client.get('/branches').then((r) => setBranches(r.data)).catch(() => {});
-    loadBills();
-  }, []);
+  const { data: branches = [] } = useQuery<Branch[]>({
+    queryKey: ['branches'],
+    queryFn: () => client.get('/branches').then((r) => r.data),
+    enabled: isAdmin,
+  });
 
-  const loadBills = async () => {
-    setLoading(true);
-    try {
+  const { data: bills = [], isLoading: loading } = useQuery<Bill[]>({
+    queryKey: ['bills', searchParams],
+    queryFn: () => {
       const params: any = {};
-      if (filters.startDate) params.startDate = filters.startDate;
-      if (filters.endDate) params.endDate = filters.endDate;
-      if (filters.status) params.status = filters.status;
-      if (filters.branchId) params.branchId = filters.branchId;
-      const { data } = await client.get('/bills', { params });
-      setBills(data);
-    } catch {
-      toast.error('โหลดรายการบิลไม่สำเร็จ');
-    } finally {
-      setLoading(false);
-    }
-  };
+      if (searchParams.startDate) params.startDate = searchParams.startDate;
+      if (searchParams.endDate) params.endDate = searchParams.endDate;
+      if (searchParams.status) params.status = searchParams.status;
+      if (searchParams.branchId) params.branchId = searchParams.branchId;
+      return client.get('/bills', { params }).then((r) => r.data);
+    },
+  });
 
-  const cancelBill = async (id: string) => {
+  const cancelMutation = useMutation({
+    mutationFn: (id: string) => client.put(`/bills/${id}/cancel`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bills'] }); toast.success('ยกเลิกบิลเรียบร้อย'); },
+    onError: () => toast.error('ยกเลิกบิลไม่สำเร็จ'),
+  });
+
+  const cancelBill = (id: string) => {
     if (!confirm('ยืนยันการยกเลิกบิลนี้?')) return;
-    try {
-      await client.put(`/bills/${id}/cancel`);
-      toast.success('ยกเลิกบิลเรียบร้อย');
-      loadBills();
-    } catch {
-      toast.error('ยกเลิกบิลไม่สำเร็จ');
-    }
+    cancelMutation.mutate(id);
   };
 
   const totalRevenue = bills.filter((b) => b.status === 'SUBMITTED').reduce((s, b) => s + Number(b.total), 0);
@@ -108,8 +105,8 @@ export default function Bills() {
           )}
         </div>
         <div className="flex gap-2 mt-3">
-          <button onClick={loadBills} className="btn-primary">ค้นหา</button>
-          <button onClick={() => setFilters({ startDate: today, endDate: today, status: '', branchId: '' })} className="btn-secondary">รีเซ็ต</button>
+          <button onClick={() => setSearchParams({ ...filters })} className="btn-primary">ค้นหา</button>
+          <button onClick={() => { setFilters(defaultFilters); setSearchParams(defaultFilters); }} className="btn-secondary">รีเซ็ต</button>
         </div>
       </div>
 

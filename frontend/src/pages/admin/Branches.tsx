@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, Building2, KeyRound } from 'lucide-react';
 import client from '../../api/client';
@@ -11,22 +12,41 @@ const EMPTY = {
 };
 
 export default function Branches() {
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [loading, setLoading] = useState(false);
+  const qc = useQueryClient();
   const [selected, setSelected] = useState<string[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Branch | null>(null);
   const [form, setForm] = useState(EMPTY);
-  const [saving, setSaving] = useState(false);
 
-  useEffect(() => { load(); }, []);
+  const { data: branches = [], isLoading: loading } = useQuery<Branch[]>({
+    queryKey: ['branches'],
+    queryFn: () => client.get('/branches').then((r) => r.data),
+  });
 
-  const load = async () => {
-    setLoading(true);
-    try { const { data } = await client.get('/branches'); setBranches(data); }
-    catch { toast.error('โหลดข้อมูลสาขาไม่สำเร็จ'); }
-    finally { setLoading(false); }
-  };
+  const saveMutation = useMutation({
+    mutationFn: (payload: any) =>
+      editing
+        ? client.put(`/branches/${editing.id}`, payload)
+        : client.post('/branches', payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['branches'] });
+      setShowModal(false);
+      toast.success(editing ? 'อัพเดทสาขาเรียบร้อย' : 'เพิ่มสาขาเรียบร้อย');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error || 'บันทึกไม่สำเร็จ'),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => client.delete(`/branches/${id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['branches'] }); toast.success('ลบเรียบร้อย'); },
+    onError: (err: any) => toast.error(err.response?.data?.error || 'ลบไม่สำเร็จ'),
+  });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: (ids: string[]) => client.delete('/branches/bulk', { data: { ids } }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['branches'] }); setSelected([]); toast.success('ลบเรียบร้อย'); },
+    onError: () => toast.error('ลบหลายรายการไม่สำเร็จ'),
+  });
 
   const openAdd = () => { setEditing(null); setForm(EMPTY); setShowModal(true); };
   const openEdit = (b: Branch) => {
@@ -39,43 +59,34 @@ export default function Branches() {
     setShowModal(true);
   };
 
-  const handleSave = async (e: React.FormEvent) => {
+  const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (form.pincode && !/^\d{4,6}$/.test(form.pincode)) {
       toast.error('รหัส PIN ต้องเป็นตัวเลข 4-6 หลักเท่านั้น');
       return;
     }
-    setSaving(true);
-    try {
-      const payload: any = {
-        name: form.name, code: form.code, address: form.address, phone: form.phone,
-        active: form.active, type: form.type,
-        reportBranchId: form.reportBranchId || null,
-        bigsellerBranchId: form.bigsellerBranchId || null,
-      };
-      if (form.pincode) payload.pincode = form.pincode;
-      else if (editing) payload.pincode = '';
-
-      if (editing) { await client.put(`/branches/${editing.id}`, payload); toast.success('อัพเดทสาขาเรียบร้อย'); }
-      else { await client.post('/branches', payload); toast.success('เพิ่มสาขาเรียบร้อย'); }
-      setShowModal(false);
-      load();
-    } catch (err: any) {
-      toast.error(err.response?.data?.error || 'บันทึกไม่สำเร็จ');
-    } finally { setSaving(false); }
+    const payload: any = {
+      name: form.name, code: form.code, address: form.address, phone: form.phone,
+      active: form.active, type: form.type,
+      reportBranchId: form.reportBranchId || null,
+      bigsellerBranchId: form.bigsellerBranchId || null,
+    };
+    if (form.pincode) payload.pincode = form.pincode;
+    else if (editing) payload.pincode = '';
+    saveMutation.mutate(payload);
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string) => {
     if (!confirm('ลบสาขานี้? การลบจะล้มเหลวหากมีบิลหรือผู้ใช้ที่เชื่อมโยงอยู่')) return;
-    try { await client.delete(`/branches/${id}`); toast.success('ลบเรียบร้อย'); load(); }
-    catch (err: any) { toast.error(err.response?.data?.error || 'ลบไม่สำเร็จ'); }
+    deleteMutation.mutate(id);
   };
 
-  const handleBulkDelete = async () => {
+  const handleBulkDelete = () => {
     if (!confirm(`ลบ ${selected.length} สาขา?`)) return;
-    try { await client.delete('/branches/bulk', { data: { ids: selected } }); toast.success('ลบเรียบร้อย'); setSelected([]); load(); }
-    catch { toast.error('ลบหลายรายการไม่สำเร็จ'); }
+    bulkDeleteMutation.mutate(selected);
   };
+
+  const saving = saveMutation.isPending;
 
   const toggleSelect = (id: string) => setSelected((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
   const toggleAll = () => setSelected(selected.length === branches.length ? [] : branches.map((b) => b.id));

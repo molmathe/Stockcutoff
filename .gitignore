@@ -13,8 +13,8 @@ backend/dist/
 # Uploads
 backend/uploads/
 
-# Prisma
-backend/prisma/migrations/
+# Prisma (migrations are tracked in version control)
+# backend/prisma/migrations/
 
 # OS
 .DS_Store

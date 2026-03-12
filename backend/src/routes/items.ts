@@ -7,10 +7,10 @@ import { upload } from '../middleware/upload';
 
 const router = Router();
 
-// Get all items
+// Get all items (with optional pagination)
 router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const { search, category, active } = req.query;
+    const { search, category, active, page, limit } = req.query;
     const where: any = {};
     if (search) {
       where.OR = [
@@ -21,6 +21,19 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
     }
     if (category) where.category = category;
     if (active !== undefined) where.active = active === 'true';
+
+    // Pagination (only when ?page is provided)
+    if (page !== undefined) {
+      const pageNum = Math.max(1, parseInt(page as string) || 1);
+      const limitNum = Math.min(200, Math.max(1, parseInt(limit as string) || 50));
+      const skip = (pageNum - 1) * limitNum;
+      const [items, total] = await Promise.all([
+        prisma.item.findMany({ where, orderBy: { name: 'asc' }, skip, take: limitNum }),
+        prisma.item.count({ where }),
+      ]);
+      return res.json({ items, total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum) });
+    }
+
     const items = await prisma.item.findMany({ where, orderBy: { name: 'asc' } });
     res.json(items);
   } catch {
