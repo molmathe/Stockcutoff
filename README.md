@@ -4,6 +4,13 @@ Full-stack Point-of-Sale and inventory management web app.
 
 ## Changelog
 
+### v0.4.0
+- **DB indexes** — added composite and single-column indexes on Bill, BillItem, and Item tables; applied via Prisma migration on startup
+- **Pagination** — Items API supports `?page` + `?limit`; Items page shows 50 items per page with prev/next controls and total count
+- **React Query** — all admin pages (Dashboard, Items, Categories, Users, Branches, Bills) now use `@tanstack/react-query` v5 for caching, deduplication, and automatic background refresh (30 s stale time)
+- **Shared caches** — branches and categories queries are deduped across pages; category rename invalidates items cache
+- **Export All CSV** — fetches the complete (non-paginated) dataset regardless of current page
+
 ### v0.3.1
 - **Branding** — renamed to *Fonney StockCutoff*; version badge shown in sidebar
 - **Drag-drop image mapping** — fixed blank-page bug when files dropped outside zone; fixed result display showing `[object Object]`; fixed highlight flicker on child elements; added real-time upload progress bar (bytes transferred + server processing phase)
