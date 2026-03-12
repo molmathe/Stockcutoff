@@ -13,18 +13,21 @@ Full-stack Point-of-Sale and inventory management web app.
 
 ### Admin Backend
 - **Dashboard** — today's revenue, top items, 7-day trend, branch comparison
-- **Items** — CRUD with image upload; bulk CSV import; bulk delete
-- **Branches** — CRUD with bulk delete
+- **Items** — CRUD with drag-drop image upload; bulk CSV import; bulk delete; category tagging
+- **Categories** — CRUD for product categories
+- **Branches** — CRUD with type (ถาวร/ชั่วคราว), external IDs (reportBranchId, bigsellerBranchId), PIN management
 - **Users** — CRUD, role management (Super Admin / Branch Admin / Cashier)
-- **Reports** — filter by date range, branch; download Excel (3 sheets: bills, item details, item summary)
+- **Reports** — filter by date range & branch; download Excel; **Export Master** (combined POS + import data)
+- **Report Templates** *(SUPER_ADMIN)* — configurable column-mapping for Excel import files
+- **Import Sales** *(SUPER_ADMIN)* — upload an Excel file, preview every row with match status, then submit matched rows as bills
 
 ## Roles
 
-| Role | POS | Items | Branches | Users | Reports |
-|------|-----|-------|----------|-------|---------|
-| SUPER_ADMIN | ✅ | ✅ | ✅ | ✅ | ✅ (all branches) |
-| BRANCH_ADMIN | ✅ | ✅ | ✅ | ✅ (cashiers only) | ✅ (own branch) |
-| CASHIER | ✅ | view | — | — | — |
+| Role | POS | Items | Branches | Users | Reports | Import |
+|------|-----|-------|----------|-------|---------|--------|
+| SUPER_ADMIN | ✅ | ✅ | ✅ | ✅ | ✅ (all branches) | ✅ |
+| BRANCH_ADMIN | ✅ | ✅ | ✅ | ✅ (cashiers only) | ✅ (own branch) | — |
+| CASHIER | ✅ | view | — | — | — | — |
 
 ## Tech Stack
 
@@ -92,7 +95,21 @@ cloudflared tunnel --url http://localhost:80
 
 Or use the Cloudflare Zero Trust dashboard to create a persistent tunnel.
 
-## CSV Import Format
+## Excel Sales Import (v0.3)
+
+Import sales data from an Excel file exported by an external system (e.g. Bigseller).
+
+### Workflow
+1. **Create a Report Template** (`/admin/report-templates`) — map the Excel column headers to the expected fields (date, barcode/SKU, price, qty, branch name/ID).
+2. **Configure matching** — choose how to match branches (`name`, `code`, `reportBranchId`, `bigsellerBranchId`) and items (`barcode` or `sku`).
+3. **Import Sales** (`/admin/import-sales`) — select the template, upload the `.xlsx` file, click **แสดงตัวอย่าง**.
+4. A full-screen preview shows every row with colour-coded status: ✅ matched / ⚠️ no branch / 🟡 no item / 🔴 invalid.
+5. Click **นำเข้า N แถว** — matched rows are grouped by `(saleDate, branchId)` into Bills with `source=IMPORT`.
+
+### Export Master
+The **ส่งออกข้อมูลหลัก** button on the Reports page exports a single Excel sheet combining both POS-created and imported bills. Columns include: branch name, Bigseller branch ID, SKU, barcode, item name, qty, price, subtotal, sale date, source, bill number.
+
+## CSV Import Format (Items)
 
 Items bulk import accepts CSV with header row:
 
