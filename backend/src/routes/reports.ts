@@ -7,47 +7,52 @@ const router = Router();
 
 const buildWhere = (req: AuthRequest, query: any) => {
   const { branchId, startDate, endDate } = query;
-  const where: any = { status: 'SUBMITTED' };
+  const where: Record<string, any> = { status: 'SUBMITTED' };
 
-  if (req.user!.role === 'BRANCH_ADMIN') {
-    where.branchId = req.user!.branchId;
+  if (req.user!.role === 'BRANCH_ADMIN' && req.user!.branchId) {
+    where['branchId'] = req.user!.branchId;
   } else if (branchId) {
-    where.branchId = branchId;
+    where['branchId'] = branchId;
   }
 
   if (startDate || endDate) {
-    where.createdAt = {};
-    if (startDate) where.createdAt.gte = new Date(startDate as string);
+    where['createdAt'] = {};
+    if (startDate) where['createdAt'].gte = new Date(startDate as string);
     if (endDate) {
       const e = new Date(endDate as string);
       e.setHours(23, 59, 59, 999);
-      where.createdAt.lte = e;
+      where['createdAt'].lte = e;
     }
   }
   return where;
 };
 
+const branchFilter = (req: AuthRequest): Record<string, any> => {
+  if (req.user!.role === 'BRANCH_ADMIN' && req.user!.branchId) {
+    return { branchId: req.user!.branchId };
+  }
+  return {};
+};
+
 router.get('/dashboard', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const branchWhere = req.user!.role === 'BRANCH_ADMIN' ? { branchId: req.user!.branchId } : {};
+    const bw = branchFilter(req);
 
-    // Today
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
 
     const todayBills = await prisma.bill.findMany({
-      where: { ...branchWhere, status: 'SUBMITTED', createdAt: { gte: today, lt: tomorrow } },
+      where: { ...bw, status: 'SUBMITTED', createdAt: { gte: today, lt: tomorrow } },
       include: { items: true },
     });
 
     const todayRevenue = todayBills.reduce((s, b) => s + Number(b.total), 0);
     const todayItemsSold = todayBills.reduce((s, b) => s + b.items.reduce((si, i) => si + i.quantity, 0), 0);
 
-    // Last 7 days
     const sevenDaysAgo = new Date(today); sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+
     const recentBills = await prisma.bill.findMany({
-      where: { ...branchWhere, status: 'SUBMITTED', createdAt: { gte: sevenDaysAgo } },
-      include: { items: true },
+      where: { ...bw, status: 'SUBMITTED', createdAt: { gte: sevenDaysAgo } },
     });
 
     const dayMap: Record<string, { revenue: number; bills: number }> = {};
@@ -61,9 +66,8 @@ router.get('/dashboard', authenticate, requireAdmin, async (req: AuthRequest, re
     }
     const revenueByDay = Object.entries(dayMap).map(([date, v]) => ({ date, ...v }));
 
-    // Top items
     const allBillsForItems = await prisma.bill.findMany({
-      where: { ...branchWhere, status: 'SUBMITTED', createdAt: { gte: sevenDaysAgo } },
+      where: { ...bw, status: 'SUBMITTED', createdAt: { gte: sevenDaysAgo } },
       include: { items: { include: { item: { select: { name: true, sku: true } } } } },
     });
     const itemMap: Record<string, { name: string; sku: string; qty: number; revenue: number }> = {};
@@ -76,17 +80,16 @@ router.get('/dashboard', authenticate, requireAdmin, async (req: AuthRequest, re
     }
     const topItems = Object.values(itemMap).sort((a, b) => b.revenue - a.revenue).slice(0, 10);
 
-    // Branch comparison (super admin only)
     let branchSales: any[] = [];
     if (req.user!.role === 'SUPER_ADMIN') {
       const branches = await prisma.branch.findMany({ where: { active: true } });
       for (const br of branches) {
-        const bills = await prisma.bill.aggregate({
+        const agg = await prisma.bill.aggregate({
           where: { branchId: br.id, status: 'SUBMITTED', createdAt: { gte: sevenDaysAgo } },
           _sum: { total: true },
           _count: true,
         });
-        branchSales.push({ branch: br.name, revenue: Number(bills._sum.total || 0), bills: bills._count });
+        branchSales.push({ branch: br.name, revenue: Number(agg._sum.total || 0), bills: agg._count });
       }
     }
 
@@ -147,7 +150,6 @@ router.get('/download', authenticate, requireAdmin, async (req: AuthRequest, res
     const wb = new ExcelJS.Workbook();
     wb.creator = 'StockCutoff';
 
-    // Sheet 1: Bills
     const s1 = wb.addWorksheet('Bills');
     s1.columns = [
       { header: 'Bill Number', key: 'billNumber', width: 22 },
@@ -165,7 +167,6 @@ router.get('/download', authenticate, requireAdmin, async (req: AuthRequest, res
       subtotal: Number(b.subtotal), discount: Number(b.discount), total: Number(b.total),
     }));
 
-    // Sheet 2: Item details
     const s2 = wb.addWorksheet('Item Details');
     s2.columns = [
       { header: 'Bill Number', key: 'bill', width: 22 },
@@ -185,7 +186,6 @@ router.get('/download', authenticate, requireAdmin, async (req: AuthRequest, res
       qty: bi.quantity, price: Number(bi.price), discount: Number(bi.discount), subtotal: Number(bi.subtotal),
     })));
 
-    // Sheet 3: Item summary
     const s3 = wb.addWorksheet('Item Summary');
     s3.columns = [
       { header: 'SKU', key: 'sku', width: 14 },
