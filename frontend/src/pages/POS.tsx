@@ -13,6 +13,7 @@ interface CartItem {
   itemId: string;
   name: string;
   sku: string;
+  barcode: string;
   imageUrl: string | null;
   quantity: number;
   price: number;
@@ -94,6 +95,7 @@ export default function POS() {
         itemId: item.id,
         name: item.name,
         sku: item.sku,
+        barcode: item.barcode,
         imageUrl: item.imageUrl,
         quantity: 1,
         price: parseFloat(String(item.defaultPrice)),
@@ -180,6 +182,7 @@ export default function POS() {
         itemId: bi.itemId,
         name: bi.item?.name || `สินค้า (${bi.itemId.slice(0, 8)})`,
         sku: bi.item?.sku || '',
+        barcode: bi.item?.barcode || '',
         imageUrl: bi.item?.imageUrl || null,
         quantity: bi.quantity,
         price: parseFloat(String(bi.price)),
@@ -210,7 +213,7 @@ export default function POS() {
   const openBills = summary?.bills.filter((b) => b.status === 'OPEN') ?? [];
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 h-full">
+    <div className="flex flex-col lg:flex-row gap-4">
       {scanning && (
         <BarcodeScanner
           onScan={lookupBarcode}
@@ -402,7 +405,7 @@ export default function POS() {
 
       {/* ===== Right: Cart ===== */}
       <div className="lg:w-1/2 flex flex-col">
-        <div className="card flex-1 flex flex-col min-h-0">
+        <div className="card flex flex-col">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-gray-700">
               ตะกร้าสินค้า ({cartItems.length} รายการ)
@@ -413,90 +416,107 @@ export default function POS() {
           </div>
 
           {cartItems.length === 0 ? (
-            <div className="flex-1 flex items-center justify-center text-gray-300">
+            <div className="flex items-center justify-center text-gray-300 py-12">
               <div className="text-center">
                 <ShoppingCart size={48} className="mx-auto mb-2" />
                 <p className="text-sm">สแกนสินค้าเพื่อเพิ่มในตะกร้า</p>
               </div>
             </div>
           ) : (
-            <div className="flex-1 overflow-y-auto space-y-2 min-h-0 pr-1">
+            <div className="space-y-2">
               {cartItems.map((item) => (
                 <div
                   key={item.itemId}
-                  className="flex items-center gap-2 p-2.5 bg-gray-50 rounded-lg border border-gray-100"
+                  className="p-2.5 bg-gray-50 rounded-lg border border-gray-100 space-y-2"
                 >
-                  {item.imageUrl ? (
-                    <img src={item.imageUrl} alt={item.name} className="w-9 h-9 object-cover rounded-lg shrink-0" />
-                  ) : (
-                    <div className="w-9 h-9 bg-gray-200 rounded-lg flex items-center justify-center text-xs text-gray-400 shrink-0">
-                      {item.sku.slice(0, 3)}
+                  {/* Row 1: Image + Name/SKU + Delete */}
+                  <div className="flex items-center gap-2">
+                    {item.imageUrl ? (
+                      <img src={item.imageUrl} alt={item.name} className="w-9 h-9 object-cover rounded-lg shrink-0" />
+                    ) : (
+                      <div className="w-9 h-9 bg-gray-200 rounded-lg flex items-center justify-center text-xs text-gray-400 shrink-0">
+                        {item.sku.slice(0, 3)}
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{item.name}</p>
+                      <p className="text-[10px] text-gray-400 leading-tight truncate">{item.sku} / {item.barcode}</p>
                     </div>
-                  )}
-
-                  {/* Name */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{item.name}</p>
-                    <p className="text-xs text-gray-400">{item.sku}</p>
-                  </div>
-
-                  {/* Quantity */}
-                  <div className="flex items-center gap-1 shrink-0">
                     <button
-                      onClick={() => updateQty(item.itemId, item.quantity - 1)}
-                      className="w-6 h-6 rounded bg-gray-200 flex items-center justify-center hover:bg-gray-300"
+                      onClick={() => removeItem(item.itemId)}
+                      className="text-red-400 hover:text-red-600 shrink-0 p-1 -mr-1"
                     >
-                      <Minus size={12} />
-                    </button>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={item.quantity}
-                      onChange={(e) => {
-                        const v = parseInt(e.target.value.replace(/\D/g, '')) || 1;
-                        updateQty(item.itemId, v);
-                      }}
-                      className="w-10 text-center text-sm border border-gray-300 rounded px-1 py-0.5"
-                    />
-                    <button
-                      onClick={() => updateQty(item.itemId, item.quantity + 1)}
-                      className="w-6 h-6 rounded bg-gray-200 flex items-center justify-center hover:bg-gray-300"
-                    >
-                      <Plus size={12} />
+                      <Trash2 size={16} />
                     </button>
                   </div>
 
-                  {/* Price + Discount */}
-                  <div className="flex flex-col items-end gap-1 w-20 shrink-0">
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={item.price}
-                      onKeyDown={numericKeyDown}
-                      onChange={(e) => updatePrice(item.itemId, e.target.value)}
-                      className="w-full text-right text-sm border border-gray-300 rounded px-1 py-0.5"
-                      title="ราคา"
-                    />
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={item.discountStr}
-                      onKeyDown={numericKeyDown}
-                      onChange={(e) => updateDiscount(item.itemId, e.target.value)}
-                      className="w-full text-right text-xs border border-orange-200 bg-orange-50 rounded px-1 py-0.5 text-orange-700"
-                      title="ส่วนลดสินค้า (฿)"
-                      placeholder="ส่วนลด"
-                    />
+                  {/* Row 2: Qty | Price | Discount | Total */}
+                  <div className="flex items-end gap-2">
+                    {/* Quantity controls */}
+                    <div className="shrink-0">
+                      <p className="text-[10px] text-gray-400 mb-1">จำนวน</p>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => updateQty(item.itemId, item.quantity - 1)}
+                          className="w-7 h-7 rounded bg-gray-200 flex items-center justify-center hover:bg-gray-300 active:bg-gray-400"
+                        >
+                          <Minus size={12} />
+                        </button>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={item.quantity}
+                          onChange={(e) => {
+                            const v = parseInt(e.target.value.replace(/\D/g, '')) || 1;
+                            updateQty(item.itemId, v);
+                          }}
+                          className="w-9 text-center text-sm border border-gray-300 rounded px-1 py-1"
+                        />
+                        <button
+                          onClick={() => updateQty(item.itemId, item.quantity + 1)}
+                          className="w-7 h-7 rounded bg-gray-200 flex items-center justify-center hover:bg-gray-300 active:bg-gray-400"
+                        >
+                          <Plus size={12} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Price */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] text-gray-400 mb-1">ราคา (฿)</p>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={item.price}
+                        onKeyDown={numericKeyDown}
+                        onChange={(e) => updatePrice(item.itemId, e.target.value)}
+                        className="w-full text-right text-sm border border-gray-300 rounded px-2 py-1"
+                        title="ราคา"
+                      />
+                    </div>
+
+                    {/* Discount */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] text-gray-400 mb-1">ส่วนลด (฿)</p>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={item.discountStr}
+                        onKeyDown={numericKeyDown}
+                        onChange={(e) => updateDiscount(item.itemId, e.target.value)}
+                        className="w-full text-right text-sm border border-orange-200 bg-orange-50 rounded px-2 py-1 text-orange-700"
+                        placeholder="0"
+                      />
+                    </div>
+
+                    {/* Line total */}
+                    <div className="shrink-0 text-right">
+                      <p className="text-[10px] text-gray-400 mb-1">รวม</p>
+                      <p className="text-sm font-bold text-gray-900 py-1">
+                        ฿{fmt(item.price * item.quantity - item.discount)}
+                      </p>
+                    </div>
                   </div>
-
-                  {/* Line total */}
-                  <p className="text-sm font-semibold w-16 text-right shrink-0">
-                    ฿{fmt(item.price * item.quantity - item.discount)}
-                  </p>
-
-                  <button onClick={() => removeItem(item.itemId)} className="text-red-400 hover:text-red-600 shrink-0">
-                    <Trash2 size={16} />
-                  </button>
                 </div>
               ))}
             </div>
