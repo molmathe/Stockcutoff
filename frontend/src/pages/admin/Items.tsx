@@ -61,6 +61,8 @@ export default function Items() {
   const [editing, setEditing] = useState<Item | null>(null);
   const [form, setForm] = useState({ ...EMPTY });
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imgDragOver, setImgDragOver] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const [importText, setImportText] = useState('');
 
   // Bulk image drag-drop state
@@ -492,10 +494,38 @@ export default function Items() {
             </div>
             <div>
               <label className="label">รูปภาพสินค้า</label>
-              <input type="file" accept="image/*"
-                onChange={(e) => setImageFile(e.target.files?.[0] || null)} className="input" />
-              {editing?.imageUrl && !imageFile && (
-                <img src={editing.imageUrl} alt="current" className="mt-2 w-20 h-20 object-cover rounded-lg" />
+              <div
+                onDragOver={(e) => { e.preventDefault(); setImgDragOver(true); }}
+                onDragLeave={() => setImgDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setImgDragOver(false);
+                  const f = e.dataTransfer.files[0];
+                  if (f?.type.startsWith('image/')) setImageFile(f);
+                }}
+                onClick={() => imageInputRef.current?.click()}
+                className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-colors ${
+                  imgDragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'
+                }`}
+              >
+                {imageFile ? (
+                  <img src={URL.createObjectURL(imageFile)} alt="preview" className="mx-auto w-24 h-24 object-cover rounded-lg" />
+                ) : editing?.imageUrl ? (
+                  <img src={editing.imageUrl} alt="current" className="mx-auto w-24 h-24 object-cover rounded-lg" />
+                ) : (
+                  <>
+                    <Upload size={24} className="mx-auto mb-1.5 text-gray-400" />
+                    <p className="text-xs text-gray-500">ลากวางรูป หรือแตะเพื่อเลือก / ถ่ายรูป</p>
+                  </>
+                )}
+                <input ref={imageInputRef} type="file" accept="image/*"
+                  onChange={(e) => setImageFile(e.target.files?.[0] || null)} className="hidden" />
+              </div>
+              {imageFile && (
+                <button type="button" onClick={() => setImageFile(null)}
+                  className="text-xs text-red-400 hover:text-red-600 mt-1">
+                  ยกเลิกรูปที่เลือก
+                </button>
               )}
             </div>
             {editing && (
