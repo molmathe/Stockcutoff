@@ -259,7 +259,7 @@ export default function Branches() {
                 maxLength={4}
                 value={form.pincode}
                 onChange={(e) => setForm((f) => ({ ...f, pincode: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
-                className="input tracking-widest text-lg"
+                className="input text-sm"
                 placeholder={editing ? 'ใส่ PIN ใหม่ หรือเว้นว่างเพื่อล้าง' : 'เช่น 1234'}
               />
               <p className="text-xs text-gray-400 mt-1">ใช้สำหรับเข้าสู่ระบบ POS ด้วย PIN โดยไม่ต้องใช้รหัสผ่าน</p>
