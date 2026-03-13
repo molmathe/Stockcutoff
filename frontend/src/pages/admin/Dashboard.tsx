@@ -4,12 +4,19 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import { TrendingUp, ShoppingBag, Package, Award, X } from 'lucide-react';
 import client from '../../api/client';
 
+interface TopItem {
+  name: string; sku: string; barcode: string; imageUrl: string | null; qty: number; revenue: number;
+}
+interface DiscountItem {
+  name: string; sku: string; barcode: string; imageUrl: string | null; qty: number; totalDiscount: number;
+}
 interface DashboardData {
   todayRevenue: number;
   todayBills: number;
   todayItemsSold: number;
   revenueByDay: { date: string; revenue: number; bills: number }[];
-  topItems: { name: string; sku: string; imageUrl: string | null; qty: number; revenue: number }[];
+  topItems: TopItem[];
+  topDiscountItems: DiscountItem[];
   branchSales: { branch: string; revenue: number; bills: number }[];
 }
 
@@ -114,43 +121,46 @@ export default function Dashboard() {
 
       {/* Top items table */}
       <div className="card p-0 overflow-hidden">
-        <div className="px-5 py-3 border-b">
+        <div className="px-5 py-3 border-b bg-white">
           <h2 className="font-semibold text-gray-700">รายละเอียดสินค้าขายดี</h2>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-100">
               <tr>
-                <th className="table-header">#</th>
-                <th className="table-header w-10"></th>
+                <th className="table-header w-8 text-center">#</th>
+                <th className="table-header">รูป</th>
                 <th className="table-header">ชื่อสินค้า</th>
-                <th className="table-header">SKU</th>
+                <th className="table-header">SKU / Barcode</th>
                 <th className="table-header text-right">จำนวนที่ขาย</th>
                 <th className="table-header text-right">รายได้</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {data.topItems.slice(0, 10).map((item, i) => (
-                <tr key={i} className="hover:bg-gray-50">
-                  <td className="table-cell text-gray-400 font-medium">{i + 1}</td>
+                <tr key={i} className="hover:bg-gray-50 transition-colors">
+                  <td className="table-cell text-center text-gray-400 font-medium">{i + 1}</td>
                   <td className="table-cell">
                     {item.imageUrl ? (
                       <img
                         src={item.imageUrl}
                         alt={item.name}
-                        className="w-8 h-8 object-cover rounded cursor-pointer hover:opacity-80 transition-opacity"
+                        className="w-10 h-10 object-cover rounded-lg cursor-pointer hover:opacity-80 hover:scale-105 transition-all shadow-sm"
                         onClick={() => setPopupImg(item.imageUrl)}
                       />
                     ) : (
-                      <div className="w-8 h-8 bg-gray-100 rounded flex items-center justify-center text-[9px] text-gray-400">
+                      <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center text-[9px] text-gray-400 font-medium">
                         {item.sku.slice(0, 3)}
                       </div>
                     )}
                   </td>
-                  <td className="table-cell font-medium">{item.name}</td>
-                  <td className="table-cell text-gray-400">{item.sku}</td>
-                  <td className="table-cell text-right">{item.qty}</td>
-                  <td className="table-cell text-right font-medium text-blue-600">฿{fmt(item.revenue)}</td>
+                  <td className="table-cell font-medium text-gray-800">{item.name}</td>
+                  <td className="table-cell">
+                    <p className="text-xs text-gray-500">{item.sku}</p>
+                    {item.barcode && <p className="text-[10px] text-gray-400 leading-tight">{item.barcode}</p>}
+                  </td>
+                  <td className="table-cell text-right font-medium">{item.qty}</td>
+                  <td className="table-cell text-right font-semibold text-blue-600">฿{fmt(item.revenue)}</td>
                 </tr>
               ))}
             </tbody>
@@ -158,6 +168,62 @@ export default function Dashboard() {
           {data.topItems.length === 0 && (
             <div className="p-6 text-center text-gray-400 text-sm">ยังไม่มีข้อมูลยอดขาย</div>
           )}
+        </div>
+      </div>
+
+      {/* Top discount items table */}
+      <div className="card p-0 overflow-hidden">
+        <div className="px-5 py-3 border-b bg-white flex items-center justify-between">
+          <h2 className="font-semibold text-gray-700">สินค้าที่มีส่วนลดสูงสุด</h2>
+          {data.topDiscountItems.length > 0 && (
+            <span className="text-xs text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">
+              ส่วนลดรวม: ฿{fmt(data.topDiscountItems.reduce((s, d) => s + d.totalDiscount, 0))}
+            </span>
+          )}
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-orange-50 border-b border-orange-100">
+              <tr>
+                <th className="table-header w-8 text-center">#</th>
+                <th className="table-header">รูป</th>
+                <th className="table-header">ชื่อสินค้า</th>
+                <th className="table-header">SKU / Barcode</th>
+                <th className="table-header text-right">จำนวนที่ขาย</th>
+                <th className="table-header text-right">ส่วนลดรวม</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {data.topDiscountItems.length === 0 ? (
+                <tr><td colSpan={6} className="p-6 text-center text-gray-400 text-sm">ยังไม่มีสินค้าที่มีส่วนลดใน 7 วันล่าสุด</td></tr>
+              ) : data.topDiscountItems.map((item, i) => (
+                <tr key={i} className="hover:bg-orange-50/40 transition-colors">
+                  <td className="table-cell text-center text-gray-400 font-medium">{i + 1}</td>
+                  <td className="table-cell">
+                    {item.imageUrl ? (
+                      <img
+                        src={item.imageUrl}
+                        alt={item.name}
+                        className="w-10 h-10 object-cover rounded-lg cursor-pointer hover:opacity-80 hover:scale-105 transition-all shadow-sm"
+                        onClick={() => setPopupImg(item.imageUrl)}
+                      />
+                    ) : (
+                      <div className="w-10 h-10 bg-orange-50 rounded-lg flex items-center justify-center text-[9px] text-orange-400 font-medium">
+                        {item.sku.slice(0, 3)}
+                      </div>
+                    )}
+                  </td>
+                  <td className="table-cell font-medium text-gray-800">{item.name}</td>
+                  <td className="table-cell">
+                    <p className="text-xs text-gray-500">{item.sku}</p>
+                    {item.barcode && <p className="text-[10px] text-gray-400 leading-tight">{item.barcode}</p>}
+                  </td>
+                  <td className="table-cell text-right font-medium">{item.qty}</td>
+                  <td className="table-cell text-right font-semibold text-orange-600">-฿{fmt(item.totalDiscount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 

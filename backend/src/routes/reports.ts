@@ -113,7 +113,7 @@ router.get('/dashboard', authenticate, requireAdmin, async (req: AuthRequest, re
       }),
       prisma.bill.findMany({
         where: { ...bw, status: 'SUBMITTED', createdAt: { gte: sevenDaysAgo } },
-        include: { items: { include: { item: { select: { name: true, sku: true, imageUrl: true } } } } },
+        include: { items: { include: { item: { select: { name: true, sku: true, barcode: true, imageUrl: true } } } } },
       }),
     ]);
 
@@ -134,15 +134,22 @@ router.get('/dashboard', authenticate, requireAdmin, async (req: AuthRequest, re
     }
     const revenueByDay = Object.entries(dayMap).map(([date, v]) => ({ date, ...v }));
 
-    const itemMap: Record<string, { name: string; sku: string; imageUrl: string | null; qty: number; revenue: number }> = {};
+    const itemMap: Record<string, { name: string; sku: string; barcode: string; imageUrl: string | null; qty: number; revenue: number }> = {};
+    const discountMap: Record<string, { name: string; sku: string; barcode: string; imageUrl: string | null; qty: number; totalDiscount: number }> = {};
     for (const b of allBillsForItems) {
       for (const bi of b.items) {
-        if (!itemMap[bi.itemId]) itemMap[bi.itemId] = { name: bi.item.name, sku: bi.item.sku, imageUrl: bi.item.imageUrl, qty: 0, revenue: 0 };
+        if (!itemMap[bi.itemId]) itemMap[bi.itemId] = { name: bi.item.name, sku: bi.item.sku, barcode: bi.item.barcode, imageUrl: bi.item.imageUrl, qty: 0, revenue: 0 };
         itemMap[bi.itemId].qty += bi.quantity;
         itemMap[bi.itemId].revenue += Number(bi.subtotal);
+        if (Number(bi.discount) > 0) {
+          if (!discountMap[bi.itemId]) discountMap[bi.itemId] = { name: bi.item.name, sku: bi.item.sku, barcode: bi.item.barcode, imageUrl: bi.item.imageUrl, qty: 0, totalDiscount: 0 };
+          discountMap[bi.itemId].qty += bi.quantity;
+          discountMap[bi.itemId].totalDiscount += Number(bi.discount);
+        }
       }
     }
     const topItems = Object.values(itemMap).sort((a, b) => b.revenue - a.revenue).slice(0, 10);
+    const topDiscountItems = Object.values(discountMap).sort((a, b) => b.totalDiscount - a.totalDiscount).slice(0, 10);
 
     // Branch sales: use groupBy to avoid N+1 query
     let branchSales: any[] = [];
@@ -163,7 +170,7 @@ router.get('/dashboard', authenticate, requireAdmin, async (req: AuthRequest, re
       });
     }
 
-    res.json({ todayRevenue, todayBills: todayBills.length, todayItemsSold, revenueByDay, topItems, branchSales });
+    res.json({ todayRevenue, todayBills: todayBills.length, todayItemsSold, revenueByDay, topItems, topDiscountItems, branchSales });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Server error' });
