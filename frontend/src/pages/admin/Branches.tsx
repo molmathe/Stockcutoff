@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Plus, Pencil, Trash2, Building2, KeyRound } from 'lucide-react';
+import { Plus, Pencil, Trash2, Building2, KeyRound, Link2, Copy, Check } from 'lucide-react';
 import client from '../../api/client';
 import Modal from '../../components/Modal';
 import type { Branch, BranchType } from '../../types';
@@ -17,6 +17,17 @@ export default function Branches() {
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Branch | null>(null);
   const [form, setForm] = useState(EMPTY);
+  const [copied, setCopied] = useState(false);
+
+  const posLoginUrl = `${window.location.origin}/pos-login`;
+
+  const copyPosLink = () => {
+    navigator.clipboard.writeText(posLoginUrl).then(() => {
+      setCopied(true);
+      toast.success('คัดลอกลิงก์ POS แล้ว');
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
 
   const { data: branches = [], isLoading: loading } = useQuery<Branch[]>({
     queryKey: ['branches'],
@@ -61,8 +72,8 @@ export default function Branches() {
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    if (form.pincode && !/^\d{4,6}$/.test(form.pincode)) {
-      toast.error('รหัส PIN ต้องเป็นตัวเลข 4-6 หลักเท่านั้น');
+    if (form.pincode && !/^\d{4}$/.test(form.pincode)) {
+      toast.error('รหัส PIN ต้องเป็นตัวเลข 4 หลักเท่านั้น');
       return;
     }
     const payload: any = {
@@ -103,7 +114,20 @@ export default function Branches() {
           <Building2 className="text-blue-600" size={22} />
           <h1 className="text-xl font-bold text-gray-800">จัดการสาขา</h1>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap items-center">
+          {/* POS Login Link for sending to employees */}
+          <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5">
+            <Link2 size={14} className="text-blue-500 shrink-0" />
+            <span className="text-xs text-blue-700 font-mono hidden sm:block max-w-[220px] truncate">{posLoginUrl}</span>
+            <button
+              onClick={copyPosLink}
+              className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800 transition-colors shrink-0"
+              title="คัดลอกลิงก์ POS สำหรับส่งให้พนักงาน"
+            >
+              {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
+              <span>{copied ? 'คัดลอกแล้ว' : 'คัดลอกลิงก์'}</span>
+            </button>
+          </div>
           {selected.length > 0 && (
             <button onClick={handleBulkDelete} className="btn-danger flex items-center gap-1">
               <Trash2 size={16} /> ลบ ({selected.length})
@@ -227,14 +251,14 @@ export default function Branches() {
             <div>
               <label className="label flex items-center gap-1.5">
                 <KeyRound size={14} className="text-blue-500" />
-                รหัส PIN สำหรับ POS (4-6 หลัก)
+                รหัส PIN สำหรับ POS (4 หลัก)
               </label>
               <input
                 type="text"
                 inputMode="numeric"
-                maxLength={6}
+                maxLength={4}
                 value={form.pincode}
-                onChange={(e) => setForm((f) => ({ ...f, pincode: e.target.value.replace(/\D/g, '').slice(0, 6) }))}
+                onChange={(e) => setForm((f) => ({ ...f, pincode: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
                 className="input font-mono tracking-widest text-lg"
                 placeholder={editing ? 'กรอกใหม่เพื่อเปลี่ยน PIN (เว้นว่างเพื่อล้าง)' : 'เช่น 1234'}
               />

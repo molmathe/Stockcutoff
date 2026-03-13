@@ -41,8 +41,8 @@ router.post('/', authenticate, requireAdmin, async (req: AuthRequest, res: Respo
     if (bigsellerBranchId !== undefined) data.bigsellerBranchId = bigsellerBranchId || null;
 
     if (pincode && String(pincode).trim()) {
-      if (!/^\d{4,6}$/.test(String(pincode).trim())) {
-        return res.status(400).json({ error: 'PIN ต้องเป็นตัวเลข 4-6 หลัก' });
+      if (!/^\d{4}$/.test(String(pincode).trim())) {
+        return res.status(400).json({ error: 'PIN ต้องเป็นตัวเลข 4 หลัก' });
       }
       data.pincode = String(pincode).trim();
     }
@@ -70,10 +70,10 @@ router.put('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Res
     if (pincode !== undefined) {
       if (pincode === '' || pincode === null) {
         data.pincode = null;
-      } else if (/^\d{4,6}$/.test(String(pincode).trim())) {
+      } else if (/^\d{4}$/.test(String(pincode).trim())) {
         data.pincode = String(pincode).trim();
       } else {
-        return res.status(400).json({ error: 'PIN ต้องเป็นตัวเลข 4-6 หลัก' });
+        return res.status(400).json({ error: 'PIN ต้องเป็นตัวเลข 4 หลัก' });
       }
     }
 

@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Navigate, Link, useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
-import { Hash, Delete, ShoppingCart, ArrowLeft } from 'lucide-react';
+import { Hash, Delete, ShoppingCart } from 'lucide-react';
 
 export default function POSLogin() {
   const { user, posLogin } = useAuth();
@@ -18,14 +18,14 @@ export default function POSLogin() {
   if (user) return <Navigate to="/" replace />;
 
   const handleKeyPress = (digit: string) => {
-    if (pin.length < 6) setPin((p) => p + digit);
+    if (pin.length < 4) setPin((p) => p + digit);
   };
 
   const handleDelete = () => setPin((p) => p.slice(0, -1));
   const handleClear = () => setPin('');
 
   const handleLogin = async () => {
-    if (pin.length < 4) { toast.error('กรุณากรอกรหัส PIN อย่างน้อย 4 หลัก'); return; }
+    if (pin.length < 4) { toast.error('กรุณากรอกรหัส PIN 4 หลัก'); return; }
     setLoading(true);
     try {
       await posLogin(pin);
@@ -39,12 +39,12 @@ export default function POSLogin() {
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value.replace(/\D/g, '').slice(0, 6);
+    const val = e.target.value.replace(/\D/g, '').slice(0, 4);
     setPin(val);
   };
 
   const handleInputKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && pin.length >= 4) handleLogin();
+    if (e.key === 'Enter' && pin.length === 4) handleLogin();
   };
 
   const digits = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];
@@ -57,12 +57,12 @@ export default function POSLogin() {
             <Hash className="text-white" size={28} />
           </div>
           <h1 className="text-xl font-bold text-gray-900">เข้าสู่ระบบ POS</h1>
-          <p className="text-gray-500 text-sm mt-1">กรอกรหัส PIN ของสาขา (4-6 หลัก)</p>
+          <p className="text-gray-500 text-sm mt-1">กรอกรหัส PIN 4 หลัก</p>
         </div>
 
         {/* PIN Display */}
         <div className="flex justify-center gap-3 mb-6">
-          {Array.from({ length: 6 }).map((_, i) => (
+          {Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}
               className={`w-10 h-10 rounded-lg border-2 flex items-center justify-center text-lg font-bold transition-all ${
@@ -85,7 +85,7 @@ export default function POSLogin() {
           onChange={handleInputChange}
           onKeyDown={handleInputKeyDown}
           className="sr-only"
-          maxLength={6}
+          maxLength={4}
         />
 
         {/* Numpad */}
@@ -121,13 +121,6 @@ export default function POSLogin() {
             {loading ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ POS'}
           </span>
         </button>
-
-        <div className="mt-4 text-center">
-          <Link to="/login" className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700">
-            <ArrowLeft size={14} />
-            เข้าสู่ระบบด้วยชื่อผู้ใช้
-          </Link>
-        </div>
       </div>
     </div>
   );
