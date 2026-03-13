@@ -177,7 +177,7 @@ export default function Bills() {
                           <tr key={bi.id} className="border-b border-gray-100">
                             <td className="py-2">
                               <p className="font-medium">{bi.item?.name ?? '—'}</p>
-                              <p className="text-xs text-gray-400">{bi.item?.sku ?? ''}</p>
+                              <p className="text-[10px] text-gray-400 leading-tight">{bi.item?.sku ?? ''}{bi.item?.barcode ? ` / ${bi.item.barcode}` : ''}</p>
                             </td>
                             <td className="text-right py-2">{bi.quantity}</td>
                             <td className="text-right py-2">฿{Number(bi.price).toFixed(2)}</td>
