@@ -131,7 +131,8 @@ export default function Dashboard() {
                 <th className="table-header w-8 text-center">#</th>
                 <th className="table-header">รูป</th>
                 <th className="table-header">ชื่อสินค้า</th>
-                <th className="table-header">SKU / Barcode</th>
+                <th className="table-header">SKU</th>
+                <th className="table-header">Barcode</th>
                 <th className="table-header text-right">จำนวนที่ขาย</th>
                 <th className="table-header text-right">รายได้</th>
               </tr>
@@ -155,10 +156,8 @@ export default function Dashboard() {
                     )}
                   </td>
                   <td className="table-cell font-medium text-gray-800">{item.name}</td>
-                  <td className="table-cell">
-                    <p className="text-xs text-gray-500">{item.sku}</p>
-                    {item.barcode && <p className="text-[10px] text-gray-400 leading-tight">{item.barcode}</p>}
-                  </td>
+                  <td className="table-cell text-xs text-gray-500">{item.sku}</td>
+                  <td className="table-cell text-xs text-gray-400">{item.barcode || '—'}</td>
                   <td className="table-cell text-right font-medium">{item.qty}</td>
                   <td className="table-cell text-right font-semibold text-blue-600">฿{fmt(item.revenue)}</td>
                 </tr>
@@ -188,14 +187,15 @@ export default function Dashboard() {
                 <th className="table-header w-8 text-center">#</th>
                 <th className="table-header">รูป</th>
                 <th className="table-header">ชื่อสินค้า</th>
-                <th className="table-header">SKU / Barcode</th>
+                <th className="table-header">SKU</th>
+                <th className="table-header">Barcode</th>
                 <th className="table-header text-right">จำนวนที่ขาย</th>
                 <th className="table-header text-right">ส่วนลดรวม</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {data.topDiscountItems.length === 0 ? (
-                <tr><td colSpan={6} className="p-6 text-center text-gray-400 text-sm">ยังไม่มีสินค้าที่มีส่วนลดใน 7 วันล่าสุด</td></tr>
+                <tr><td colSpan={7} className="p-6 text-center text-gray-400 text-sm">ยังไม่มีสินค้าที่มีส่วนลดใน 7 วันล่าสุด</td></tr>
               ) : data.topDiscountItems.map((item, i) => (
                 <tr key={i} className="hover:bg-orange-50/40 transition-colors">
                   <td className="table-cell text-center text-gray-400 font-medium">{i + 1}</td>
@@ -214,10 +214,8 @@ export default function Dashboard() {
                     )}
                   </td>
                   <td className="table-cell font-medium text-gray-800">{item.name}</td>
-                  <td className="table-cell">
-                    <p className="text-xs text-gray-500">{item.sku}</p>
-                    {item.barcode && <p className="text-[10px] text-gray-400 leading-tight">{item.barcode}</p>}
-                  </td>
+                  <td className="table-cell text-xs text-gray-500">{item.sku}</td>
+                  <td className="table-cell text-xs text-gray-400">{item.barcode || '—'}</td>
                   <td className="table-cell text-right font-medium">{item.qty}</td>
                   <td className="table-cell text-right font-semibold text-orange-600">-฿{fmt(item.totalDiscount)}</td>
                 </tr>
