@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts';
-import { TrendingUp, ShoppingBag, Package, Award } from 'lucide-react';
+import { TrendingUp, ShoppingBag, Package, Award, X } from 'lucide-react';
 import client from '../../api/client';
 
 interface DashboardData {
@@ -9,7 +9,7 @@ interface DashboardData {
   todayBills: number;
   todayItemsSold: number;
   revenueByDay: { date: string; revenue: number; bills: number }[];
-  topItems: { name: string; sku: string; qty: number; revenue: number }[];
+  topItems: { name: string; sku: string; imageUrl: string | null; qty: number; revenue: number }[];
   branchSales: { branch: string; revenue: number; bills: number }[];
 }
 
@@ -21,6 +21,7 @@ export default function Dashboard() {
     queryKey: ['dashboard'],
     queryFn: () => client.get('/reports/dashboard').then((r) => r.data),
   });
+  const [popupImg, setPopupImg] = useState<string | null>(null);
 
   if (isLoading) return <div className="p-8 text-center text-gray-400">กำลังโหลดแดชบอร์ด...</div>;
   if (!data) return <div className="p-8 text-center text-red-400">โหลดแดชบอร์ดไม่สำเร็จ</div>;
@@ -121,6 +122,7 @@ export default function Dashboard() {
             <thead className="bg-gray-50">
               <tr>
                 <th className="table-header">#</th>
+                <th className="table-header w-10"></th>
                 <th className="table-header">ชื่อสินค้า</th>
                 <th className="table-header">SKU</th>
                 <th className="table-header text-right">จำนวนที่ขาย</th>
@@ -131,6 +133,20 @@ export default function Dashboard() {
               {data.topItems.slice(0, 10).map((item, i) => (
                 <tr key={i} className="hover:bg-gray-50">
                   <td className="table-cell text-gray-400 font-medium">{i + 1}</td>
+                  <td className="table-cell">
+                    {item.imageUrl ? (
+                      <img
+                        src={item.imageUrl}
+                        alt={item.name}
+                        className="w-8 h-8 object-cover rounded cursor-pointer hover:opacity-80 transition-opacity"
+                        onClick={() => setPopupImg(item.imageUrl)}
+                      />
+                    ) : (
+                      <div className="w-8 h-8 bg-gray-100 rounded flex items-center justify-center text-[9px] text-gray-400">
+                        {item.sku.slice(0, 3)}
+                      </div>
+                    )}
+                  </td>
                   <td className="table-cell font-medium">{item.name}</td>
                   <td className="table-cell text-gray-400">{item.sku}</td>
                   <td className="table-cell text-right">{item.qty}</td>
@@ -144,6 +160,24 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* Image popup */}
+      {popupImg && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setPopupImg(null)}
+        >
+          <div className="relative" onClick={(e) => e.stopPropagation()}>
+            <img src={popupImg} alt="" className="max-w-[90vw] max-h-[80vh] rounded-xl shadow-2xl object-contain" />
+            <button
+              onClick={() => setPopupImg(null)}
+              className="absolute -top-3 -right-3 w-8 h-8 bg-white rounded-full shadow flex items-center justify-center text-gray-600 hover:text-gray-900"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

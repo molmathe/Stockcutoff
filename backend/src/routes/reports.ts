@@ -113,7 +113,7 @@ router.get('/dashboard', authenticate, requireAdmin, async (req: AuthRequest, re
       }),
       prisma.bill.findMany({
         where: { ...bw, status: 'SUBMITTED', createdAt: { gte: sevenDaysAgo } },
-        include: { items: { include: { item: { select: { name: true, sku: true } } } } },
+        include: { items: { include: { item: { select: { name: true, sku: true, imageUrl: true } } } } },
       }),
     ]);
 
@@ -134,10 +134,10 @@ router.get('/dashboard', authenticate, requireAdmin, async (req: AuthRequest, re
     }
     const revenueByDay = Object.entries(dayMap).map(([date, v]) => ({ date, ...v }));
 
-    const itemMap: Record<string, { name: string; sku: string; qty: number; revenue: number }> = {};
+    const itemMap: Record<string, { name: string; sku: string; imageUrl: string | null; qty: number; revenue: number }> = {};
     for (const b of allBillsForItems) {
       for (const bi of b.items) {
-        if (!itemMap[bi.itemId]) itemMap[bi.itemId] = { name: bi.item.name, sku: bi.item.sku, qty: 0, revenue: 0 };
+        if (!itemMap[bi.itemId]) itemMap[bi.itemId] = { name: bi.item.name, sku: bi.item.sku, imageUrl: bi.item.imageUrl, qty: 0, revenue: 0 };
         itemMap[bi.itemId].qty += bi.quantity;
         itemMap[bi.itemId].revenue += Number(bi.subtotal);
       }

@@ -176,8 +176,19 @@ export default function Bills() {
                         {bill.items.map((bi) => (
                           <tr key={bi.id} className="border-b border-gray-100">
                             <td className="py-2">
-                              <p className="font-medium">{bi.item?.name ?? '—'}</p>
-                              <p className="text-[10px] text-gray-400 leading-tight">{bi.item?.sku ?? ''}{bi.item?.barcode ? ` / ${bi.item.barcode}` : ''}</p>
+                              <div className="flex items-center gap-2">
+                                {bi.item?.imageUrl ? (
+                                  <img src={bi.item.imageUrl} alt={bi.item.name} className="w-8 h-8 object-cover rounded shrink-0" />
+                                ) : (
+                                  <div className="w-8 h-8 bg-gray-100 rounded flex items-center justify-center text-[9px] text-gray-400 shrink-0">
+                                    {(bi.item?.sku ?? '?').slice(0, 3)}
+                                  </div>
+                                )}
+                                <div>
+                                  <p className="font-medium">{bi.item?.name ?? '—'}</p>
+                                  <p className="text-[10px] text-gray-400 leading-tight">{bi.item?.sku ?? ''}{bi.item?.barcode ? ` / ${bi.item.barcode}` : ''}</p>
+                                </div>
+                              </div>
                             </td>
                             <td className="text-right py-2">{bi.quantity}</td>
                             <td className="text-right py-2">฿{Number(bi.price).toFixed(2)}</td>
