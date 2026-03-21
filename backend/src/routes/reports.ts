@@ -180,16 +180,21 @@ router.get('/dashboard', authenticate, requireAdmin, async (req: AuthRequest, re
     const { today, tomorrow } = getThaiDayRange();
     const sevenDaysAgo = new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000);
 
+    const dateFilterToday = { gte: today, lt: tomorrow };
+    const dateFilter7Days = { gte: sevenDaysAgo };
+    const whereToday: any = { ...bw, status: 'SUBMITTED', OR: [{ saleDate: null, createdAt: dateFilterToday }, { saleDate: dateFilterToday }] };
+    const where7Days: any = { ...bw, status: 'SUBMITTED', OR: [{ saleDate: null, createdAt: dateFilter7Days }, { saleDate: dateFilter7Days }] };
+
     const [todayBills, recentBills, allBillsForItems] = await Promise.all([
       prisma.bill.findMany({
-        where: { ...bw, status: 'SUBMITTED', createdAt: { gte: today, lt: tomorrow } },
+        where: whereToday,
         include: { items: true },
       }),
       prisma.bill.findMany({
-        where: { ...bw, status: 'SUBMITTED', createdAt: { gte: sevenDaysAgo } },
+        where: where7Days,
       }),
       prisma.bill.findMany({
-        where: { ...bw, status: 'SUBMITTED', createdAt: { gte: sevenDaysAgo } },
+        where: where7Days,
         include: { items: { include: { item: { select: { name: true, sku: true, barcode: true, imageUrl: true } } } } },
       }),
     ]);
@@ -206,7 +211,8 @@ router.get('/dashboard', authenticate, requireAdmin, async (req: AuthRequest, re
       dayMap[thaiKey] = { revenue: 0, bills: 0 };
     }
     for (const b of recentBills) {
-      const key = new Date(b.createdAt.getTime() + THAI_OFFSET_MS).toISOString().split('T')[0];
+      const recordDate = b.saleDate || b.createdAt;
+      const key = new Date(recordDate.getTime() + THAI_OFFSET_MS).toISOString().split('T')[0];
       if (dayMap[key]) { dayMap[key].revenue += Number(b.total); dayMap[key].bills++; }
     }
     const revenueByDay = Object.entries(dayMap).map(([date, v]) => ({ date, ...v }));
@@ -235,7 +241,7 @@ router.get('/dashboard', authenticate, requireAdmin, async (req: AuthRequest, re
         prisma.branch.findMany({ where: { active: true }, select: { id: true, name: true } }),
         prisma.bill.groupBy({
           by: ['branchId'],
-          where: { status: 'SUBMITTED', createdAt: { gte: sevenDaysAgo } },
+          where: where7Days,
           _sum: { total: true },
           _count: true,
         }),
