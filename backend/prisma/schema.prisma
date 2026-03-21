@@ -58,6 +58,7 @@ model Branch {
   type              BranchType @default(PERMANENT)
   reportBranchId    String?
   bigsellerBranchId String?
+  tags              String[]   @default([])
   active            Boolean    @default(true)
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt

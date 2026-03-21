@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Plus, Pencil, Trash2, Building2, KeyRound, Link2, Copy, Check, FileUp, FileSpreadsheet, X, Upload } from 'lucide-react';
+import { Plus, Pencil, Trash2, Building2, KeyRound, Link2, Copy, Check, Tag, X, FileUp, FileSpreadsheet, Upload, } from 'lucide-react';
 import client from '../../api/client';
 import Modal from '../../components/Modal';
 import type { Branch, BranchType } from '../../types';
@@ -9,6 +9,7 @@ import type { Branch, BranchType } from '../../types';
 const EMPTY = {
   name: '', code: '', address: '', phone: '', pincode: '', active: true,
   type: 'PERMANENT' as BranchType, reportBranchId: '', bigsellerBranchId: '',
+  tags: [] as string[],
 };
 
 export default function Branches() {
@@ -18,6 +19,7 @@ export default function Branches() {
   const [editing, setEditing] = useState<Branch | null>(null);
   const [form, setForm] = useState(EMPTY);
   const [copied, setCopied] = useState(false);
+  const [tagInput, setTagInput] = useState('');
 
   // Import State
   const [showImport, setShowImport] = useState(false);
@@ -67,16 +69,27 @@ export default function Branches() {
     onError: () => toast.error('ลบหลายรายการไม่สำเร็จ'),
   });
 
-  const openAdd = () => { setEditing(null); setForm(EMPTY); setShowModal(true); };
+  const openAdd = () => { setEditing(null); setForm(EMPTY); setTagInput(''); setShowModal(true); };
   const openEdit = (b: Branch) => {
     setEditing(b);
     setForm({
       name: b.name, code: b.code, address: b.address || '', phone: b.phone || '',
       pincode: '', active: b.active, type: b.type || 'PERMANENT',
       reportBranchId: b.reportBranchId || '', bigsellerBranchId: b.bigsellerBranchId || '',
+      tags: b.tags || [],
     });
+    setTagInput('');
     setShowModal(true);
   };
+
+  const addTag = () => {
+    const t = tagInput.trim();
+    if (!t) return;
+    if (form.tags.includes(t)) { toast.error('Tag นี้มีอยู่แล้ว'); return; }
+    setForm((f) => ({ ...f, tags: [...f.tags, t] }));
+    setTagInput('');
+  };
+  const removeTag = (tag: string) => setForm((f) => ({ ...f, tags: f.tags.filter((t) => t !== tag) }));
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -89,6 +102,7 @@ export default function Branches() {
       active: form.active, type: form.type,
       reportBranchId: form.reportBranchId || null,
       bigsellerBranchId: form.bigsellerBranchId || null,
+      tags: form.tags,
     };
     if (form.pincode) payload.pincode = form.pincode;
     else if (editing) payload.pincode = '';
@@ -134,14 +148,14 @@ export default function Branches() {
   const handleImportRowChange = (index: number, field: string, value: string) => {
     const newPreview = [...importPreview];
     newPreview[index] = { ...newPreview[index], [field]: value };
-    
+
     // Quick re-validation
     const row = newPreview[index];
     const errors = [];
     if (!row.code) errors.push('ระบุรหัสสาขา');
     if (!row.name) errors.push('ระบุชื่อสาขา');
     row.errors = errors;
-    
+
     if (errors.length === 0 && row.status === 'invalid') {
        row.status = 'new'; // Let backend handle exact UPSERT
     } else if (errors.length > 0) {
@@ -218,6 +232,7 @@ export default function Branches() {
                 </th>
                 <th className="table-header">รหัสสาขา</th>
                 <th className="table-header">ชื่อสาขา</th>
+                <th className="table-header">Tags / ชื่ออื่น</th>
                 <th className="table-header">ประเภท</th>
                 <th className="table-header">รหัสรายงาน / Bigseller</th>
                 <th className="table-header">เบอร์โทร</th>
@@ -228,9 +243,9 @@ export default function Branches() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={9} className="p-8 text-center text-gray-400">กำลังโหลด...</td></tr>
+                <tr><td colSpan={10} className="p-8 text-center text-gray-400">กำลังโหลด...</td></tr>
               ) : branches.length === 0 ? (
-                <tr><td colSpan={9} className="p-8 text-center text-gray-400">ยังไม่มีสาขา</td></tr>
+                <tr><td colSpan={10} className="p-8 text-center text-gray-400">ยังไม่มีสาขา</td></tr>
               ) : branches.map((b) => (
                 <tr key={b.id} className="hover:bg-gray-50">
                   <td className="table-cell">
@@ -240,6 +255,19 @@ export default function Branches() {
                   <td className="table-cell font-medium">
                     <div>{b.name}</div>
                     {b.address && <div className="text-xs text-gray-400 truncate max-w-[180px]">{b.address}</div>}
+                  </td>
+                  <td className="table-cell">
+                    {b.tags && b.tags.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {b.tags.map((tag) => (
+                          <span key={tag} className="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
+                            <Tag size={9} /> {tag}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
                   </td>
                   <td className="table-cell">{typeBadge(b.type)}</td>
                   <td className="table-cell text-xs text-gray-500 space-y-0.5">
@@ -310,6 +338,38 @@ export default function Branches() {
             </div>
 
             <div>
+              <label className="label flex items-center gap-1.5">
+                <Tag size={13} className="text-blue-500" />
+                Tags / ชื่ออื่น
+              </label>
+              <div className="flex gap-2">
+                <input
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } }}
+                  className="input flex-1"
+                  placeholder="เช่น บูธ, Hall A, ชั้น 3 (กด Enter เพื่อเพิ่ม)"
+                />
+                <button type="button" onClick={addTag} className="btn-secondary px-3 shrink-0">
+                  <Plus size={15} />
+                </button>
+              </div>
+              {form.tags.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {form.tags.map((tag) => (
+                    <span key={tag} className="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-1 rounded-full">
+                      <Tag size={9} /> {tag}
+                      <button type="button" onClick={() => removeTag(tag)} className="ml-0.5 text-blue-400 hover:text-red-500 transition-colors">
+                        <X size={11} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-gray-400 mt-1">ชื่อที่สาขานี้ถูกเรียกในรายงาน หรือชื่อเรียกอื่นๆ</p>
+            </div>
+
+            <div>
               <label className="label">ที่อยู่</label>
               <input value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} className="input" placeholder="ที่อยู่สาขา" />
             </div>
@@ -350,7 +410,7 @@ export default function Branches() {
       {showImport && (
         <div className="fixed inset-0 z-50 bg-black/60 flex flex-col p-4 md:p-8">
           <div className="bg-white rounded-xl shadow-xl flex-1 flex flex-col overflow-hidden max-w-6xl mx-auto w-full relative">
-            
+
             <div className="bg-white border-b px-6 py-4 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
                 <FileUp className="text-blue-600" size={24} />

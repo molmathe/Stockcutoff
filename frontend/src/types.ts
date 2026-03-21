@@ -17,6 +17,7 @@ export interface Branch {
   type: BranchType;
   reportBranchId: string | null;
   bigsellerBranchId: string | null;
+  tags: string[];
   hasPincode?: boolean;
   createdAt: string;
 }

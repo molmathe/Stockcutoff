@@ -96,7 +96,7 @@ router.post('/', authenticate, requireAdmin, upload.single('image'), async (req:
     });
     res.status(201).json(item);
   } catch (err: any) {
-    if (err.code === 'P2002') return res.status(400).json({ error: 'บาร์โค้ดซ้ำ' });
+    if (err.code === 'P2002') return res.status(400).json({ error: 'SKU หรือบาร์โค้ดซ้ำ' });
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -143,7 +143,7 @@ router.post('/bulk-import', authenticate, requireAdmin, async (req: AuthRequest,
         });
         if (existing) updated++; else created++;
       } catch (e: any) {
-        errors.push(`Barcode ${it.barcode}: ${e.message}`);
+        errors.push(`Barcode ${it.barcode}: บาร์โค้ดซ้ำ ไม่สามารถนำเข้าได้`);
       }
     }
     res.json({ message: `นำเข้าเรียบร้อย: สร้าง ${created}, อัพเดท ${updated}`, created, updated, errors });
@@ -218,7 +218,7 @@ router.put('/:id', authenticate, requireAdmin, upload.single('image'), async (re
     });
     res.json(item);
   } catch (err: any) {
-    if (err.code === 'P2002') return res.status(400).json({ error: 'บาร์โค้ดซ้ำ' });
+    if (err.code === 'P2002') return res.status(400).json({ error: 'บาร์โค้ดซ้ำ กรุณาใช้บาร์โค้ดอื่น' });
     res.status(500).json({ error: 'Server error' });
   }
 });
