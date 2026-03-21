@@ -46,7 +46,11 @@ export function cellStr(value: any): string {
 }
 
 function findColIdx(headers: string[], possibleNames: string[]): number {
-  return headers.findIndex((h) => possibleNames.some(p => h && h.toLowerCase().includes(p.toLowerCase())));
+  for (const name of possibleNames) {
+    const idx = headers.findIndex((h) => h && h.toLowerCase().includes(name.toLowerCase()));
+    if (idx !== -1) return idx;
+  }
+  return -1;
 }
 
 export async function parseExcelData(buffer: Buffer, platform: ImportPlatform): Promise<ParsedRow[]> {
@@ -72,7 +76,7 @@ export async function parseExcelData(buffer: Buffer, platform: ImportPlatform): 
   if (platform === 'PLAYHOUSE') {
     dateCol = findColIdx(headers, ['date', 'วันที่']);
     branchCol = findColIdx(headers, ['branch', 'สาขา']);
-    itemCol = findColIdx(headers, ['sku', 'item']);
+    itemCol = findColIdx(headers, ['barcode', 'sku', 'item code', 'item']);
     qtyCol = findColIdx(headers, ['sales quantity', 'quantity', 'จำนวน']);
     totalCol = findColIdx(headers, ['net sales', 'total', 'ยอดสุทธิ']);
   } else if (platform === 'MBK') {
