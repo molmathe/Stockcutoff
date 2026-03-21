@@ -11,7 +11,7 @@ import billRoutes from './routes/bills';
 import userRoutes from './routes/users';
 import reportRoutes from './routes/reports';
 import categoryRoutes from './routes/categories';
-import reportTemplateRoutes from './routes/report-templates';
+// Removed reportTemplateRoutes
 
 dotenv.config();
 
@@ -65,7 +65,7 @@ app.use('/api/bills', billRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/categories', categoryRoutes);
-app.use('/api/report-templates', reportTemplateRoutes);
+// Removed /api/report-templates route
 
 app.get('/health', (_req, res) => res.json({ status: 'ok', time: new Date() }));
 

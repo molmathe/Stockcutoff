@@ -91,6 +91,7 @@ model Bill {
   user        User       @relation(fields: [userId], references: [id])
   status      BillStatus @default(OPEN)
   source      String     @default("POS")    // "POS" | "IMPORT"
+  importPlatform String?                     // "CENTRAL" | "MBK" | "THE_MALL"
   saleDate    DateTime?                      // original sale date for imported records
   subtotal    Decimal    @db.Decimal(10, 2) @default(0)
   discount    Decimal    @db.Decimal(10, 2) @default(0)
@@ -119,24 +120,4 @@ model BillItem {
 
   @@index([billId])
   @@index([itemId])
-}
-
-model ReportTemplate {
-  id               String   @id @default(cuid())
-  name             String
-  description      String?
-  // Column header names as they appear in the Excel file
-  columnDate       String?
-  columnBarcode    String?
-  columnSku        String?
-  columnPrice      String   @default("Price")
-  columnQty        String   @default("Qty")
-  columnBranchId   String?
-  columnBranchName String?
-  // How to match branches: "name" | "code" | "reportBranchId" | "bigsellerBranchId"
-  branchMatchBy    String   @default("name")
-  // How to match items: "barcode" | "sku"
-  itemMatchBy      String   @default("barcode")
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
 }

@@ -2,7 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { Upload, FileSpreadsheet, CheckCircle2, XCircle, AlertCircle, X, FileUp } from 'lucide-react';
 import client from '../../api/client';
-import type { ReportTemplate, ImportPreview, ImportPreviewRow } from '../../types';
+import type { ImportPreview, ImportPreviewRow } from '../../types';
+
+const PLATFORMS = [
+  { id: 'CENTRAL', name: 'Central / Robinson' },
+  { id: 'MBK', name: 'MBK / At First' },
+  { id: 'PLAYHOUSE', name: 'Playhouse' },
+];
 
 type FilterTab = 'all' | 'matched' | 'unmatched';
 
@@ -21,8 +27,7 @@ const STATUS_BADGE: Record<ImportPreviewRow['status'], string> = {
 };
 
 export default function ImportSales() {
-  const [templates, setTemplates] = useState<ReportTemplate[]>([]);
-  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [selectedPlatform, setSelectedPlatform] = useState(PLATFORMS[0].id);
   const [file, setFile] = useState<File | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
@@ -30,26 +35,19 @@ export default function ImportSales() {
   const [submitting, setSubmitting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    client.get('/report-templates').then((r) => {
-      setTemplates(r.data);
-      if (r.data.length > 0) setSelectedTemplateId(r.data[0].id);
-    }).catch(() => toast.error('โหลดเทมเพลตไม่สำเร็จ'));
-  }, []);
-
   const handleFileChange = (f: File | null) => {
     setFile(f);
     setPreview(null);
   };
 
   const handlePreview = async () => {
-    if (!selectedTemplateId) { toast.error('กรุณาเลือกเทมเพลต'); return; }
+    if (!selectedPlatform) { toast.error('กรุณาเลือกแพลตฟอร์ม'); return; }
     if (!file) { toast.error('กรุณาเลือกไฟล์ Excel'); return; }
     setPreviewing(true);
     try {
       const fd = new FormData();
       fd.append('file', file);
-      fd.append('templateId', selectedTemplateId);
+      fd.append('platform', selectedPlatform);
       const { data } = await client.post('/reports/import/preview', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
@@ -67,7 +65,7 @@ export default function ImportSales() {
     if (!confirm(`นำเข้าข้อมูล ${matchedRows.length} แถว ยืนยัน?`)) return;
     setSubmitting(true);
     try {
-      const { data } = await client.post('/reports/import/submit', { rows: matchedRows });
+      const { data } = await client.post('/reports/import/submit', { rows: matchedRows, platform: selectedPlatform });
       toast.success(data.message || `นำเข้า ${data.count} บิลเรียบร้อย`);
       setPreview(null);
       setFile(null);
@@ -96,14 +94,10 @@ export default function ImportSales() {
       {/* Upload Card */}
       <div className="card space-y-4">
         <div>
-          <label className="label">เลือกเทมเพลต *</label>
-          {templates.length === 0 ? (
-            <p className="text-sm text-orange-500">ยังไม่มีเทมเพลต กรุณาสร้างเทมเพลตก่อน</p>
-          ) : (
-            <select value={selectedTemplateId} onChange={(e) => setSelectedTemplateId(e.target.value)} className="input max-w-xs">
-              {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          )}
+          <label className="label">เลือกแพลตฟอร์ม / รูปแบบไฟล์ *</label>
+          <select value={selectedPlatform} onChange={(e) => setSelectedPlatform(e.target.value)} className="input max-w-xs">
+            {PLATFORMS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
         </div>
 
         <div>
@@ -139,7 +133,7 @@ export default function ImportSales() {
         <div>
           <button
             onClick={handlePreview}
-            disabled={previewing || !file || !selectedTemplateId}
+            disabled={previewing || !file || !selectedPlatform}
             className="btn-primary flex items-center gap-2"
           >
             <FileSpreadsheet size={16} />

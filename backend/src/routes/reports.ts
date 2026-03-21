@@ -4,6 +4,7 @@ import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import prisma from '../lib/prisma';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
+import { parseExcelData, ImportPlatform } from '../lib/excelParsers';
 
 const router = Router();
 const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
@@ -379,54 +380,15 @@ router.get('/export-master', authenticate, requireAdmin, async (req: AuthRequest
 router.post('/import/preview', authenticate, requireAdmin, importUpload.single('file'), async (req: AuthRequest, res: Response) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'กรุณาอัพโหลดไฟล์ Excel' });
-    const { templateId } = req.body;
-    if (!templateId) return res.status(400).json({ error: 'กรุณาเลือกเทมเพลต' });
-
-    const template = await prisma.reportTemplate.findUnique({ where: { id: templateId } });
-    if (!template) return res.status(404).json({ error: 'ไม่พบเทมเพลต' });
+    const { platform } = req.body;
+    if (!platform || !['CENTRAL', 'MBK', 'PLAYHOUSE'].includes(platform)) {
+      return res.status(400).json({ error: 'กรุณาเลือกแพลตฟอร์ม' });
+    }
 
     const allBranches = await prisma.branch.findMany({ where: { active: true } });
     const allItems = await prisma.item.findMany({ where: { active: true } });
 
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(req.file.buffer as any);
-    const ws = wb.worksheets[0];
-    if (!ws) return res.status(400).json({ error: 'ไม่พบชีตในไฟล์ Excel' });
-
-    const headers: string[] = [];
-    ws.getRow(1).eachCell({ includeEmpty: true }, (cell, colNum) => {
-      headers[colNum - 1] = cellStr(cell.value);
-    });
-
-    const colIdx = (name: string | null): number =>
-      name ? headers.indexOf(name) : -1;
-
-    const dateCol = colIdx(template.columnDate);
-    const barcodeCol = colIdx(template.columnBarcode);
-    const skuCol = colIdx(template.columnSku);
-    const priceCol = colIdx(template.columnPrice);
-    const qtyCol = colIdx(template.columnQty);
-    const branchIdCol = colIdx(template.columnBranchId);
-    const branchNameCol = colIdx(template.columnBranchName);
-
-    const findBranch = (branchValue: string) => {
-      if (!branchValue) return null;
-      const v = branchValue.trim();
-      switch (template.branchMatchBy) {
-        case 'name': return allBranches.find((b) => b.name === v) || null;
-        case 'code': return allBranches.find((b) => b.code === v) || null;
-        case 'reportBranchId': return allBranches.find((b) => b.reportBranchId === v) || null;
-        case 'bigsellerBranchId': return allBranches.find((b) => b.bigsellerBranchId === v) || null;
-        default: return allBranches.find((b) => b.name === v) || null;
-      }
-    };
-
-    const findItem = (itemValue: string) => {
-      if (!itemValue) return null;
-      const v = itemValue.trim();
-      if (template.itemMatchBy === 'sku') return allItems.find((i) => i.sku === v) || null;
-      return allItems.find((i) => i.barcode === v) || null;
-    };
+    const parsedRows = await parseExcelData(req.file.buffer, platform as ImportPlatform);
 
     const rows: any[] = [];
     let totalQty = 0;
@@ -434,87 +396,73 @@ router.post('/import/preview', authenticate, requireAdmin, importUpload.single('
     let matched = 0;
     let rowCount = 0;
 
-    ws.eachRow((row, rowNum) => {
-      if (rowNum === 1) return; // skip header
-      if (rowCount >= MAX_IMPORT_ROWS) return; // hard cap to prevent DoS
+    for (const r of parsedRows) {
+      if (rowCount >= MAX_IMPORT_ROWS) break;
       rowCount++;
 
-      const getCellVal = (colIndex: number) =>
-        colIndex >= 0 ? row.getCell(colIndex + 1).value : null;
+      let branch = null;
+      let item = null;
 
-      const rawBranchId = branchIdCol >= 0 ? cellStr(getCellVal(branchIdCol)) : '';
-      const rawBranchName = branchNameCol >= 0 ? cellStr(getCellVal(branchNameCol)) : '';
-      const rawBranch = rawBranchId || rawBranchName;
+      if (r.rawBranch) {
+        const v = r.rawBranch.trim().toLowerCase();
+        branch = allBranches.find(b => 
+            b.name.toLowerCase() === v || 
+            b.code.toLowerCase() === v || 
+            (b.reportBranchId && b.reportBranchId.toLowerCase() === v) || 
+            (b.bigsellerBranchId && b.bigsellerBranchId.toLowerCase() === v)
+        ) || null;
+      }
 
-      const rawBarcodeVal = barcodeCol >= 0 ? cellStr(getCellVal(barcodeCol)) : '';
-      const rawSkuVal = skuCol >= 0 ? cellStr(getCellVal(skuCol)) : '';
-      const rawItem = template.itemMatchBy === 'sku' ? rawSkuVal : rawBarcodeVal;
-      const rawItemFallback = rawBarcodeVal || rawSkuVal;
+      if (r.rawItem) {
+        const v = r.rawItem.trim().toLowerCase();
+        item = allItems.find(i => 
+            i.sku.toLowerCase() === v || 
+            i.barcode.toLowerCase() === v
+        ) || null;
+      }
 
-      const rawDateVal = dateCol >= 0 ? getCellVal(dateCol) : null;
-      const rawPriceVal = getCellVal(priceCol);
-      const rawQtyVal = getCellVal(qtyCol);
-
-      if (!rawBranch && !rawItem && !rawDateVal && !rawPriceVal && !rawQtyVal) return;
-
-      const saleDate = parseExcelDate(rawDateVal);
-      const qty = parseFloat(cellStr(rawQtyVal)) || 0;
-      const price = parseFloat(cellStr(rawPriceVal)) || 0;
       const errors: string[] = [];
+      if (!r.saleDate) errors.push('วันที่ไม่ถูกต้อง');
+      if (r.qty <= 0) errors.push('จำนวนต้องมากว่า 0');
+      if (r.price < 0) errors.push('ราคาไม่ถูกต้อง');
+      if (!branch && r.rawBranch) errors.push(`ไม่พบสาขา: ${r.rawBranch}`);
+      if (!item && r.rawItem) errors.push(`ไม่พบสินค้า: ${r.rawItem}`);
 
-      if (!saleDate) errors.push('วันที่ไม่ถูกต้อง');
-      if (qty <= 0) errors.push('จำนวนต้องมากกว่า 0');
-      if (price < 0) errors.push('ราคาไม่ถูกต้อง');
-
-      const branch = findBranch(rawBranch);
-      const item = findItem(rawItem || rawItemFallback);
-
-      if (!branch && rawBranch) errors.push(`ไม่พบสาขา: ${rawBranch}`);
-      if (!item && rawItem) errors.push(`ไม่พบสินค้า: ${rawItem || rawItemFallback}`);
-
-      const isMatched = !!saleDate && !!branch && !!item && qty > 0 && price >= 0 && errors.length === 0;
+      const isMatched = !!(r.saleDate && branch && item && r.qty > 0 && r.price >= 0 && errors.length === 0);
 
       if (isMatched) {
         matched++;
-        totalQty += qty;
-        totalRevenue += qty * price;
+        totalQty += r.qty;
+        totalRevenue += r.qty * r.price;
       }
 
       rows.push({
-        rowNum,
-        rawDate: cellStr(rawDateVal),
-        saleDate: saleDate ? saleDate.toISOString().split('T')[0] : null,
-        rawBranch,
+        rowNum: r.rowNum,
+        rawDate: r.rawDate,
+        saleDate: r.saleDate ? r.saleDate.toISOString().split('T')[0] : null,
+        rawBranch: r.rawBranch,
         branchId: branch?.id || null,
-        branchName: branch?.name || rawBranch,
-        rawItem: rawItem || rawItemFallback,
+        branchName: branch?.name || r.rawBranch,
+        rawItem: r.rawItem,
         itemId: item?.id || null,
         itemName: item?.name || '',
-        itemSku: item?.sku || rawSkuVal,
-        itemBarcode: item?.barcode || rawBarcodeVal,
-        qty,
-        price,
+        itemSku: item?.sku || '',
+        itemBarcode: item?.barcode || '',
+        qty: r.qty,
+        price: r.price,
         status: isMatched ? 'matched' : errors.length ? 'invalid' : (!branch ? 'no_branch' : 'no_item'),
         errors,
       });
-    });
+    }
 
     const truncated = rowCount >= MAX_IMPORT_ROWS;
     res.json({
       rows,
-      stats: {
-        total: rows.length,
-        matched,
-        unmatched: rows.length - matched,
-        totalQty,
-        totalRevenue,
-        truncated,
-        maxRows: MAX_IMPORT_ROWS,
-      },
+      stats: { total: rows.length, matched, unmatched: rows.length - matched, totalQty, totalRevenue, truncated, maxRows: MAX_IMPORT_ROWS },
     });
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: 'ประมวลผลไฟล์ไม่สำเร็จ' });
+    res.status(500).json({ error: 'ประมวลผลไฟล์ไม่สำเร็จ: ' + (e as Error).message });
   }
 });
 
@@ -522,7 +470,7 @@ router.post('/import/preview', authenticate, requireAdmin, importUpload.single('
 
 router.post('/import/submit', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const { rows } = req.body as {
+    const { rows, platform } = req.body as {
       rows: Array<{
         saleDate: string;
         branchId: string;
@@ -530,6 +478,7 @@ router.post('/import/submit', authenticate, requireAdmin, async (req: AuthReques
         qty: number;
         price: number;
       }>;
+      platform: ImportPlatform;
     };
 
     if (!Array.isArray(rows) || rows.length === 0) {
@@ -577,6 +526,7 @@ router.post('/import/submit', authenticate, requireAdmin, async (req: AuthReques
           userId: req.user!.id,
           status: 'SUBMITTED',
           source: 'IMPORT',
+          importPlatform: platform || null,
           saleDate: group.saleDate,
           subtotal,
           discount: 0,
