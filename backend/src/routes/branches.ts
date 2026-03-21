@@ -1,13 +1,65 @@
 import { Router, Response } from 'express';
 import prisma from '../lib/prisma';
+import multer from 'multer';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
+import { parseBranchExcel } from '../lib/branchParser';
 
 const router = Router();
+const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 const safeBranch = (b: any) => {
   const { pincode, ...rest } = b;
   return { ...rest, hasPincode: !!pincode };
 };
+
+// POST import/preview
+router.post('/import/preview', authenticate, requireAdmin, importUpload.single('file'), async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'กรุณาอัพโหลดไฟล์ Excel' });
+    const existing = await prisma.branch.findMany({ select: { code: true } });
+    const codes = new Set(existing.map((b) => b.code));
+    const rows = await parseBranchExcel(req.file.buffer, codes);
+    res.json(rows);
+  } catch (err: any) {
+    console.error(err);
+    res.status(400).json({ error: err.message || 'วิเคราะห์ไฟล์ไม่สำเร็จ' });
+  }
+});
+
+// POST import/submit
+router.post('/import/submit', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { rows } = req.body as { rows: Array<any> };
+    if (!Array.isArray(rows) || rows.length === 0) return res.status(400).json({ error: 'ไม่มีข้อมูลที่นำเข้าได้' });
+
+    let count = 0;
+    for (const row of rows) {
+      if (!row.code || !row.name) continue;
+      await prisma.branch.upsert({
+        where: { code: row.code },
+        update: {
+          name: row.name,
+          address: row.address,
+          reportBranchId: row.reportBranchId || null,
+          type: row.type || 'PERMANENT',
+        },
+        create: {
+          code: row.code,
+          name: row.name,
+          address: row.address,
+          reportBranchId: row.reportBranchId || null,
+          type: row.type || 'PERMANENT',
+          active: true,
+        },
+      });
+      count++;
+    }
+    res.json({ message: `นำเข้า ${count} สาขาเรียบร้อย`, count });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ error: 'นำเข้าไม่สำเร็จ' });
+  }
+});
 
 // GET all branches
 router.get('/', authenticate, async (_req, res: Response) => {

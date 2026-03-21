@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Plus, Pencil, Trash2, Building2, KeyRound, Link2, Copy, Check } from 'lucide-react';
+import { Plus, Pencil, Trash2, Building2, KeyRound, Link2, Copy, Check, FileUp, FileSpreadsheet, X, Upload } from 'lucide-react';
 import client from '../../api/client';
 import Modal from '../../components/Modal';
 import type { Branch, BranchType } from '../../types';
@@ -18,6 +18,14 @@ export default function Branches() {
   const [editing, setEditing] = useState<Branch | null>(null);
   const [form, setForm] = useState(EMPTY);
   const [copied, setCopied] = useState(false);
+
+  // Import State
+  const [showImport, setShowImport] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreview, setImportPreview] = useState<any[]>([]);
+  const [previewing, setPreviewing] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const importFileRef = React.useRef<HTMLInputElement>(null);
 
   const posLoginUrl = `${window.location.origin}/pos-login`;
 
@@ -102,6 +110,64 @@ export default function Branches() {
   const toggleSelect = (id: string) => setSelected((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
   const toggleAll = () => setSelected(selected.length === branches.length ? [] : branches.map((b) => b.id));
 
+  // Import Logic
+  const handleImportFileChange = (f: File | null) => {
+    setImportFile(f);
+    setImportPreview([]);
+  };
+
+  const handlePreviewImport = async () => {
+    if (!importFile) return;
+    setPreviewing(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', importFile);
+      const { data } = await client.post('/branches/import/preview', fd);
+      setImportPreview(data);
+    } catch (e: any) {
+      toast.error(e.response?.data?.error || 'วิเคราะห์ไฟล์ไม่สำเร็จ');
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
+  const handleImportRowChange = (index: number, field: string, value: string) => {
+    const newPreview = [...importPreview];
+    newPreview[index] = { ...newPreview[index], [field]: value };
+    
+    // Quick re-validation
+    const row = newPreview[index];
+    const errors = [];
+    if (!row.code) errors.push('ระบุรหัสสาขา');
+    if (!row.name) errors.push('ระบุชื่อสาขา');
+    row.errors = errors;
+    
+    if (errors.length === 0 && row.status === 'invalid') {
+       row.status = 'new'; // Let backend handle exact UPSERT
+    } else if (errors.length > 0) {
+       row.status = 'invalid';
+    }
+    setImportPreview(newPreview);
+  };
+
+  const submitImport = async () => {
+    const validRows = importPreview.filter(r => r.status !== 'invalid' && r.code && r.name);
+    if (validRows.length === 0) return toast.error('ไม่มีข้อมูลที่ถูกต้องให้นำเข้า');
+    setImporting(true);
+    try {
+      const { data } = await client.post('/branches/import/submit', { rows: validRows });
+      toast.success(data.message);
+      setShowImport(false);
+      setImportFile(null);
+      setImportPreview([]);
+      qc.invalidateQueries({ queryKey: ['branches'] });
+    } catch (e: any) {
+      toast.error(e.response?.data?.error || 'นำเข้าไม่สำเร็จ');
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const typeBadge = (type: BranchType) =>
     type === 'PERMANENT'
       ? <span className="inline-flex text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">ถาวร</span>
@@ -133,6 +199,9 @@ export default function Branches() {
               <Trash2 size={16} /> ลบ ({selected.length})
             </button>
           )}
+          <button onClick={() => setShowImport(true)} className="btn-secondary flex items-center gap-1">
+            <FileUp size={16} /> นำเข้าจาก Excel
+          </button>
           <button onClick={openAdd} className="btn-primary flex items-center gap-1">
             <Plus size={16} /> เพิ่มสาขา
           </button>
@@ -276,6 +345,136 @@ export default function Branches() {
             </div>
           </form>
         </Modal>
+      )}
+
+      {showImport && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex flex-col p-4 md:p-8">
+          <div className="bg-white rounded-xl shadow-xl flex-1 flex flex-col overflow-hidden max-w-6xl mx-auto w-full relative">
+            
+            <div className="bg-white border-b px-6 py-4 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <FileUp className="text-blue-600" size={24} />
+                <h2 className="text-lg font-bold text-gray-800">นำเข้าสาขา (Excel)</h2>
+              </div>
+              <button onClick={() => { setShowImport(false); setImportPreview([]); setImportFile(null); }} className="text-gray-400 hover:text-gray-700 p-1"><X size={22} /></button>
+            </div>
+
+            <div className="p-6 shrink-0 flex items-end gap-4 border-b bg-gray-50/50">
+              <div className="flex-1">
+                <label className="label">ไฟล์ Excel (branch.xlsx)</label>
+                <div
+                  className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-colors flex items-center justify-center gap-3 ${importFile ? 'border-green-300 bg-green-50' : 'border-gray-300 hover:border-blue-400 bg-white'}`}
+                  onClick={() => importFileRef.current?.click()}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleImportFileChange(f); }}
+                >
+                  {importFile ? (
+                    <>
+                      <FileSpreadsheet className="text-green-600 shrink-0" size={24} />
+                      <div className="text-left flex-1 min-w-0">
+                        <p className="font-medium text-gray-800 truncate">{importFile.name}</p>
+                        <p className="text-xs text-green-600">{(importFile.size / 1024).toFixed(1)} KB - พร้อมแสดงตัวอย่าง</p>
+                      </div>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); handleImportFileChange(null); if (importFileRef.current) importFileRef.current.value = ''; }}
+                        className="p-1 hover:bg-green-100 rounded text-gray-500 hover:text-red-500"><X size={18} /></button>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="text-gray-400 shrink-0" size={24} />
+                      <div className="text-left text-gray-500">
+                        <p className="font-medium text-sm">คลิกหรือลากไฟล์แม่แบบสาขามาวางที่นี่</p>
+                        <p className="text-xs mt-0.5 opacity-80 cursor-pointer text-blue-500 hover:underline">ดาวน์โหลดแม่แบบ branch.xlsx</p>
+                      </div>
+                    </>
+                  )}
+                </div>
+                <input ref={importFileRef} type="file" accept=".xlsx,.xls" className="hidden"
+                  onChange={(e) => handleImportFileChange(e.target.files?.[0] ?? null)} />
+              </div>
+              <button onClick={handlePreviewImport} disabled={previewing || !importFile} className="btn-secondary h-[72px] px-6">
+                {previewing ? 'กำลังอ่าน...' : 'อ่านข้อมูล'}
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-auto bg-gray-50 p-6">
+              {importPreview.length > 0 ? (
+                <div className="card p-0 overflow-hidden shadow-sm border border-gray-200">
+                  <div className="bg-white px-4 py-3 border-b flex items-center justify-between">
+                    <div>
+                      <h3 className="font-bold text-gray-800">ตัวอย่างข้อมูล และแก้ไขข้อมูลก่อนส่ง</h3>
+                      <p className="text-xs text-gray-500">แก้ไขข้อมูลที่ผิดพลาดได้โดยตรงในตารางด้านล่าง</p>
+                    </div>
+                    <div className="text-sm font-medium">พบ {importPreview.length} รายการ</div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 text-gray-500">
+                        <tr>
+                          <th className="py-2 px-3 text-left font-medium w-12 border-b">#</th>
+                          <th className="py-2 px-3 text-left font-medium border-b w-32">รหัสสาขา*</th>
+                          <th className="py-2 px-3 text-left font-medium border-b min-w-[150px]">ชื่อสาขา*</th>
+                          <th className="py-2 px-3 text-left font-medium border-b w-32">ประเภท</th>
+                          <th className="py-2 px-3 text-left font-medium border-b w-40">ที่อยู่ / จังหวัด</th>
+                          <th className="py-2 px-3 text-left font-medium border-b w-32">รหัส Store</th>
+                          <th className="py-2 px-3 text-left font-medium border-b w-28 text-center">สถานะ</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 bg-white">
+                        {importPreview.map((r, i) => (
+                          <tr key={r.rowNum} className="hover:bg-blue-50/30">
+                            <td className="py-2 px-3 text-gray-400 text-xs">{r.rowNum}</td>
+                            <td className="py-2 px-3">
+                              <input value={r.code} onChange={(e) => handleImportRowChange(i, 'code', e.target.value)} className={`w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:bg-white focus:outline-none px-1 py-0.5 rounded transition-all ${!r.code ? 'bg-red-50 border-red-300 placeholder-red-300' : ''}`} placeholder="รหัส" />
+                            </td>
+                            <td className="py-2 px-3">
+                              <input value={r.name} onChange={(e) => handleImportRowChange(i, 'name', e.target.value)} className={`w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:bg-white focus:outline-none px-1 py-0.5 rounded transition-all ${!r.name ? 'bg-red-50 border-red-300 placeholder-red-300' : ''}`} placeholder="ชื่อ" />
+                            </td>
+                            <td className="py-2 px-3">
+                              <select value={r.type} onChange={(e) => handleImportRowChange(i, 'type', e.target.value)} className="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:bg-white focus:outline-none px-1 py-0.5 rounded cursor-pointer">
+                                <option value="PERMANENT">ถาวร</option>
+                                <option value="TEMPORARY">ชั่วคราว</option>
+                              </select>
+                            </td>
+                            <td className="py-2 px-3">
+                              <input value={r.address} onChange={(e) => handleImportRowChange(i, 'address', e.target.value)} className="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:bg-white focus:outline-none px-1 py-0.5 rounded transition-all" placeholder="จังหวัด..." />
+                            </td>
+                            <td className="py-2 px-3">
+                              <input value={r.reportBranchId} onChange={(e) => handleImportRowChange(i, 'reportBranchId', e.target.value)} className="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:bg-white focus:outline-none px-1 py-0.5 rounded font-mono transition-all" placeholder="RPT..." />
+                            </td>
+                            <td className="py-2 px-3 text-center">
+                              {r.status === 'new' && <span className="inline-block px-2 text-[10px] font-bold tracking-wide uppercase bg-green-100 text-green-700 rounded-full">สาขาใหม่</span>}
+                              {r.status === 'update' && <span className="inline-block px-2 text-[10px] font-bold tracking-wide uppercase bg-blue-100 text-blue-700 rounded-full">อัพเดท</span>}
+                              {r.status === 'invalid' && <span className="inline-block px-2 text-[10px] font-bold tracking-wide uppercase bg-red-100 text-red-700 rounded-full" title={r.errors.join(', ')}>ไม่สมบูรณ์</span>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-gray-400 p-8 text-center border-2 border-dashed border-gray-200 rounded-2xl bg-white">
+                  <FileSpreadsheet size={48} className="mb-4 text-gray-300" />
+                  <p className="font-medium text-gray-500">ยังไม่มีข้อมูลที่จะแสดง</p>
+                  <p className="text-sm mt-1 max-w-sm">กรุณาเลือกไฟล์ Excel และกดปุ่มอ่านข้อมูล เพื่อดูตัวอย่างและแก้ไขข้อมูลก่อนนำเข้าสู่ระบบ</p>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white border-t px-6 py-4 shrink-0 flex items-center justify-between">
+              <p className="text-sm text-gray-500">
+                พร้อมนำเข้า: <span className="font-bold text-gray-700">{importPreview.filter(r => r.status !== 'invalid').length}</span> รายการ
+              </p>
+              <div className="flex gap-3">
+                <button onClick={() => setShowImport(false)} className="btn-secondary">ยกเลิก</button>
+                <button onClick={submitImport} disabled={importing || importPreview.length === 0} className="btn-primary flex items-center gap-2">
+                  <Check size={16} />
+                  {importing ? 'กำลังบันทึก...' : 'ยีนยันการนำเข้า'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
