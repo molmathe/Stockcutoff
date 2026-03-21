@@ -119,7 +119,8 @@ async function remapImportRows(inputRows: any[], maxRows = 10000) {
           b.name.toLowerCase() === v ||
           b.code.toLowerCase() === v ||
           (b.reportBranchId && b.reportBranchId.toLowerCase() === v) ||
-          (b.bigsellerBranchId && b.bigsellerBranchId.toLowerCase() === v)
+          (b.bigsellerBranchId && b.bigsellerBranchId.toLowerCase() === v) ||
+          (b.tags && b.tags.some(tag => tag.toLowerCase() === v))
       ) || null;
     }
 
