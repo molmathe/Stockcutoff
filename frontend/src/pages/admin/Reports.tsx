@@ -20,6 +20,7 @@ export default function Reports() {
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [exportingMaster, setExportingMaster] = useState(false);
+  const [exportingBigseller, setExportingBigseller] = useState(false);
 
   const today = format(new Date(), 'yyyy-MM-dd');
   const [filters, setFilters] = useState({ branchId: '', startDate: today, endDate: today });
@@ -72,6 +73,31 @@ export default function Reports() {
       toast.error('ดาวน์โหลดไม่สำเร็จ');
     } finally {
       setDownloading(false);
+    }
+  };
+
+  const handleExportBigseller = async () => {
+    setExportingBigseller(true);
+    try {
+      const res = await client.get('/reports/export-bigseller', {
+        params: {
+          ...(filters.branchId && { branchId: filters.branchId }),
+          ...(filters.startDate && { startDate: filters.startDate }),
+          ...(filters.endDate && { endDate: filters.endDate }),
+        },
+        responseType: 'blob',
+      });
+      const url = URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `bigseller-import-${filters.startDate}-${filters.endDate}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('ดาวน์โหลดไฟล์ BigSeller เรียบร้อย');
+    } catch {
+      toast.error('ดาวน์โหลดไม่สำเร็จ');
+    } finally {
+      setExportingBigseller(false);
     }
   };
 
@@ -139,6 +165,9 @@ export default function Reports() {
           </button>
           <button onClick={handleExportMaster} disabled={exportingMaster} className="btn-secondary flex items-center gap-1">
             <Database size={15} /> {exportingMaster ? 'กำลังส่งออก...' : 'ส่งออกข้อมูลหลัก'}
+          </button>
+          <button onClick={handleExportBigseller} disabled={exportingBigseller || bills.length === 0} className="btn-secondary flex items-center gap-1">
+            <Download size={15} /> {exportingBigseller ? 'กำลังส่งออก...' : 'ส่งออก BigSeller'}
           </button>
         </div>
       </div>
