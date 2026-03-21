@@ -644,6 +644,11 @@ router.post('/unresolved-sales/resolve', authenticate, requireAdmin, async (req:
         }
       });
 
+      await prisma.item.update({
+        where: { id: item.id },
+        data: { saleDate: parsedDate },
+      });
+
       await prisma.unresolvedSale.update({
         where: { id: record.id },
         data: { status: 'RESOLVED' }
@@ -758,6 +763,16 @@ router.post('/import/submit', authenticate, requireAdmin, async (req: AuthReques
           },
         },
       });
+
+      await Promise.all(
+        group.items.map((r) =>
+          prisma.item.update({
+            where: { id: r.itemId },
+            data: { saleDate: group.saleDate },
+          })
+        )
+      );
+
       createdCount++;
     }
 
