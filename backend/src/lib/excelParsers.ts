@@ -60,7 +60,7 @@ export async function parseExcelData(buffer: Buffer, platform: ImportPlatform): 
   if (!ws) throw new Error('ไม่พบชีตในไฟล์ Excel');
 
   const rows: ParsedRow[] = [];
-  
+
   let headerRowIdx = 1;
   if (platform === 'PLAYHOUSE') headerRowIdx = 2;
   if (platform === 'CENTRAL') headerRowIdx = 3;
@@ -76,14 +76,14 @@ export async function parseExcelData(buffer: Buffer, platform: ImportPlatform): 
   if (platform === 'PLAYHOUSE') {
     dateCol = findColIdx(headers, ['date', 'วันที่']);
     branchCol = findColIdx(headers, ['branch', 'สาขา']);
-    itemCol = findColIdx(headers, ['barcode', 'sku', 'item code', 'item']);
+    itemCol = findColIdx(headers, ['barcode']);
     qtyCol = findColIdx(headers, ['sales quantity', 'quantity', 'จำนวน']);
     totalCol = findColIdx(headers, ['net sales', 'total', 'ยอดสุทธิ']);
   } else if (platform === 'MBK') {
     dateCol = findColIdx(headers, ['trans date', 'date']);
     branchCol = findColIdx(headers, ['store name', 'branch']);
     // MBK usually matches by barcode
-    itemCol = findColIdx(headers, ['barcode', 'item code']); 
+    itemCol = findColIdx(headers, ['barcode']);
     qtyCol = findColIdx(headers, ['quantity', 'qty']);
     totalCol = findColIdx(headers, ['net sale', 'sales amt', 'amount']);
   } else if (platform === 'CENTRAL') {
