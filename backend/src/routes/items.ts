@@ -4,8 +4,25 @@ import fs from 'fs';
 import prisma from '../lib/prisma';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
 import { upload } from '../middleware/upload';
+import { parseItemExcel } from '../lib/itemParser';
+import multer from 'multer';
 
 const router = Router();
+const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+
+// POST import/preview
+router.post('/import/preview', authenticate, requireAdmin, importUpload.single('file'), async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'กรุณาอัพโหลดไฟล์ Excel' });
+    const existing = await prisma.item.findMany({ select: { sku: true } });
+    const skus = new Set(existing.map((b) => b.sku));
+    const rows = await parseItemExcel(req.file.buffer, skus);
+    res.json(rows);
+  } catch (err: any) {
+    console.error(err);
+    res.status(400).json({ error: err.message || 'วิเคราะห์ไฟล์ไม่สำเร็จ' });
+  }
+});
 
 // Get all items (with optional pagination)
 router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
