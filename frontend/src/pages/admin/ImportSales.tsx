@@ -177,6 +177,7 @@ export default function ImportSales() {
       setPreview(null);
       setFile(null);
       if (fileRef.current) fileRef.current.value = '';
+      queryClient.invalidateQueries({ queryKey: ['importDrafts'] });
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'นำเข้าไม่สำเร็จ');
     } finally { setSubmitting(false); }
