@@ -96,6 +96,82 @@ function generateImportBillNumber(date: Date): string {
   return `IMP${d}-${uuidv4().split('-')[0].toUpperCase().slice(0, 5)}`;
 }
 
+async function remapImportRows(inputRows: any[], maxRows = 10000) {
+  const allBranches = await prisma.branch.findMany({ where: { active: true } });
+  const allItems = await prisma.item.findMany({ where: { active: true } });
+
+  const rows: any[] = [];
+  let totalQty = 0;
+  let totalRevenue = 0;
+  let matched = 0;
+  let rowCount = 0;
+
+  for (const r of inputRows) {
+    if (rowCount >= maxRows) break;
+    rowCount++;
+
+    let branch = null;
+    let item = null;
+
+    if (r.rawBranch) {
+      const v = String(r.rawBranch).trim().toLowerCase();
+      branch = allBranches.find(b => 
+          b.name.toLowerCase() === v || 
+          b.code.toLowerCase() === v || 
+          (b.reportBranchId && b.reportBranchId.toLowerCase() === v) || 
+          (b.bigsellerBranchId && b.bigsellerBranchId.toLowerCase() === v)
+      ) || null;
+    }
+
+    if (r.rawItem) {
+      const v = String(r.rawItem).trim().toLowerCase();
+      item = allItems.find(i => 
+          i.sku.toLowerCase() === v || 
+          i.barcode.toLowerCase() === v
+      ) || null;
+    }
+
+    const errors: string[] = [];
+    if (!r.saleDate) errors.push('วันที่ไม่ถูกต้อง');
+    if (r.qty <= 0) errors.push('จำนวนต้องมากว่า 0');
+    if (r.price < 0) errors.push('ราคาไม่ถูกต้อง');
+    if (!branch && r.rawBranch) errors.push(`ไม่พบสาขา: ${r.rawBranch}`);
+    if (!item && r.rawItem) errors.push(`ไม่พบสินค้า: ${r.rawItem}`);
+
+    const isMatched = !!(r.saleDate && branch && item && r.qty > 0 && r.price >= 0 && errors.length === 0);
+
+    if (isMatched) {
+      matched++;
+      totalQty += r.qty;
+      totalRevenue += r.qty * r.price;
+    }
+
+    rows.push({
+      rowNum: r.rowNum || rowCount,
+      rawDate: r.rawDate,
+      saleDate: r.saleDate ? (typeof r.saleDate === 'string' ? r.saleDate : r.saleDate.toISOString().split('T')[0]) : null,
+      rawBranch: r.rawBranch,
+      branchId: branch?.id || null,
+      branchName: branch?.name || r.rawBranch,
+      rawItem: r.rawItem,
+      itemId: item?.id || null,
+      itemName: item?.name || '',
+      itemSku: item?.sku || '',
+      itemBarcode: item?.barcode || '',
+      qty: r.qty,
+      price: r.price,
+      status: isMatched ? 'matched' : errors.length ? 'invalid' : (!branch ? 'no_branch' : 'no_item'),
+      errors,
+    });
+  }
+
+  const truncated = rowCount >= maxRows;
+  return {
+    rows,
+    stats: { total: rows.length, matched, unmatched: rows.length - matched, totalQty, totalRevenue, truncated, maxRows },
+  };
+}
+
 // ─── Dashboard ──────────────────────────────────────────────────────────────
 
 router.get('/dashboard', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
@@ -375,6 +451,82 @@ router.get('/export-master', authenticate, requireAdmin, async (req: AuthRequest
   }
 });
 
+// ─── Import Drafts ────────────────────────────────────────────────────────────
+
+router.get('/import/drafts', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const drafts = await prisma.importDraft.findMany({
+      where: { userId: req.user!.id },
+      orderBy: { updatedAt: 'desc' }
+    });
+    const summary = drafts.map(d => ({
+      id: d.id, platform: d.platform, fileName: d.fileName, createdAt: d.createdAt, updatedAt: d.updatedAt
+    }));
+    res.json(summary);
+  } catch (e) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.post('/import/draft', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { platform, fileName, rows } = req.body;
+    let draftId = req.body.draftId;
+    
+    if (draftId) {
+      await prisma.importDraft.update({
+        where: { id: draftId },
+        data: { rowsData: rows, updatedAt: new Date() }
+      });
+    } else {
+      const draft = await prisma.importDraft.create({
+        data: { userId: req.user!.id, platform, fileName, rowsData: rows }
+      });
+      draftId = draft.id;
+    }
+    res.json({ success: true, draftId });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to save draft' });
+  }
+});
+
+router.post('/import/draft/:id/resume', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const draft = await prisma.importDraft.findUnique({ where: { id: req.params.id } });
+    if (!draft) return res.status(404).json({ error: 'Not found' });
+    
+    // We treat the saved rows as raw input lines mapped by old mapping, but we re-map them entirely!
+    const result = await remapImportRows(draft.rowsData as any[], MAX_IMPORT_ROWS);
+    
+    res.json({
+      draftId: draft.id,
+      platform: draft.platform,
+      fileName: draft.fileName,
+      ...result
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to resume draft' });
+  }
+});
+
+router.delete('/import/draft/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    await prisma.importDraft.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.post('/import/match', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const result = await remapImportRows([req.body], 1);
+    res.json(result.rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: 'Mapping lookup failed' });
+  }
+});
+
 // ─── Import Preview ──────────────────────────────────────────────────────────
 
 router.post('/import/preview', authenticate, requireAdmin, importUpload.single('file'), async (req: AuthRequest, res: Response) => {
@@ -385,81 +537,9 @@ router.post('/import/preview', authenticate, requireAdmin, importUpload.single('
       return res.status(400).json({ error: 'กรุณาเลือกแพลตฟอร์ม' });
     }
 
-    const allBranches = await prisma.branch.findMany({ where: { active: true } });
-    const allItems = await prisma.item.findMany({ where: { active: true } });
-
     const parsedRows = await parseExcelData(req.file.buffer, platform as ImportPlatform);
-
-    const rows: any[] = [];
-    let totalQty = 0;
-    let totalRevenue = 0;
-    let matched = 0;
-    let rowCount = 0;
-
-    for (const r of parsedRows) {
-      if (rowCount >= MAX_IMPORT_ROWS) break;
-      rowCount++;
-
-      let branch = null;
-      let item = null;
-
-      if (r.rawBranch) {
-        const v = r.rawBranch.trim().toLowerCase();
-        branch = allBranches.find(b => 
-            b.name.toLowerCase() === v || 
-            b.code.toLowerCase() === v || 
-            (b.reportBranchId && b.reportBranchId.toLowerCase() === v) || 
-            (b.bigsellerBranchId && b.bigsellerBranchId.toLowerCase() === v)
-        ) || null;
-      }
-
-      if (r.rawItem) {
-        const v = r.rawItem.trim().toLowerCase();
-        item = allItems.find(i => 
-            i.sku.toLowerCase() === v || 
-            i.barcode.toLowerCase() === v
-        ) || null;
-      }
-
-      const errors: string[] = [];
-      if (!r.saleDate) errors.push('วันที่ไม่ถูกต้อง');
-      if (r.qty <= 0) errors.push('จำนวนต้องมากว่า 0');
-      if (r.price < 0) errors.push('ราคาไม่ถูกต้อง');
-      if (!branch && r.rawBranch) errors.push(`ไม่พบสาขา: ${r.rawBranch}`);
-      if (!item && r.rawItem) errors.push(`ไม่พบสินค้า: ${r.rawItem}`);
-
-      const isMatched = !!(r.saleDate && branch && item && r.qty > 0 && r.price >= 0 && errors.length === 0);
-
-      if (isMatched) {
-        matched++;
-        totalQty += r.qty;
-        totalRevenue += r.qty * r.price;
-      }
-
-      rows.push({
-        rowNum: r.rowNum,
-        rawDate: r.rawDate,
-        saleDate: r.saleDate ? r.saleDate.toISOString().split('T')[0] : null,
-        rawBranch: r.rawBranch,
-        branchId: branch?.id || null,
-        branchName: branch?.name || r.rawBranch,
-        rawItem: r.rawItem,
-        itemId: item?.id || null,
-        itemName: item?.name || '',
-        itemSku: item?.sku || '',
-        itemBarcode: item?.barcode || '',
-        qty: r.qty,
-        price: r.price,
-        status: isMatched ? 'matched' : errors.length ? 'invalid' : (!branch ? 'no_branch' : 'no_item'),
-        errors,
-      });
-    }
-
-    const truncated = rowCount >= MAX_IMPORT_ROWS;
-    res.json({
-      rows,
-      stats: { total: rows.length, matched, unmatched: rows.length - matched, totalQty, totalRevenue, truncated, maxRows: MAX_IMPORT_ROWS },
-    });
+    const result = await remapImportRows(parsedRows, MAX_IMPORT_ROWS);
+    res.json(result);
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'ประมวลผลไฟล์ไม่สำเร็จ: ' + (e as Error).message });

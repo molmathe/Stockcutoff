@@ -129,5 +129,7 @@ export interface ImportPreview {
     unmatched: number;
     totalQty: number;
     totalRevenue: number;
+    truncated?: boolean;
+    maxRows?: number;
   };
 }

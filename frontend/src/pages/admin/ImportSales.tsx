@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { Upload, FileSpreadsheet, CheckCircle2, XCircle, AlertCircle, X, FileUp } from 'lucide-react';
+import { Upload, FileSpreadsheet, CheckCircle2, XCircle, AlertCircle, X, FileUp, Trash2, Clock, Save } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import client from '../../api/client';
 import type { ImportPreview, ImportPreviewRow } from '../../types';
 
@@ -33,7 +34,17 @@ export default function ImportSales() {
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
   const [submitting, setSubmitting] = useState(false);
+  const [resumingDraftId, setResumingDraftId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  
+  const queryClient = useQueryClient();
+  const { data: drafts } = useQuery({
+    queryKey: ['importDrafts'],
+    queryFn: async () => {
+      const { data } = await client.get('/reports/import/drafts');
+      return data as { id: string; platform: string; fileName: string; createdAt: string; updatedAt: string }[];
+    }
+  });
 
   const handleFileChange = (f: File | null) => {
     setFile(f);
@@ -52,10 +63,100 @@ export default function ImportSales() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setPreview(data);
+      setPreview({ ...data, fileName: file.name });
       setFilterTab('all');
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'วิเคราะห์ไฟล์ไม่สำเร็จ');
     } finally { setPreviewing(false); }
+  };
+
+  const calculateStats = (rows: ImportPreviewRow[]) => {
+    let matched = 0, totalQty = 0, totalRevenue = 0;
+    for (const r of rows) {
+      if (r.status === 'matched') {
+        matched++;
+        totalQty += r.qty;
+        totalRevenue += r.qty * r.price;
+      }
+    }
+    return {
+      total: rows.length, matched, unmatched: rows.length - matched,
+      totalQty, totalRevenue,
+      truncated: preview?.stats.truncated || false,
+      maxRows: preview?.stats.maxRows || 10000
+    };
+  };
+
+  const handleRefreshRow = async (rowNum: number, field: 'rawBranch' | 'rawItem', value: string) => {
+    if (!preview) return;
+    const row = preview.rows.find(r => r.rowNum === rowNum);
+    if (!row || row[field] === value) return; // Unchanged
+
+    const originalRow = { ...row, [field]: value };
+    try {
+      const { data } = await client.post('/reports/import/match', originalRow);
+      setPreview(prev => {
+        if (!prev) return prev;
+        const newRows = prev.rows.map(r => r.rowNum === rowNum ? data : r);
+        return { ...prev, rows: newRows, stats: calculateStats(newRows) };
+      });
+    } catch {
+      toast.error('อัพเดทข้อมูลใหม่ล้มเหลว');
+    }
+  };
+
+  const handleDeleteRow = (rowNum: number) => {
+    if (!confirm('ยืนยันที่จะลบสินค้ารายการนี้?')) return;
+    setPreview(prev => {
+      if (!prev) return prev;
+      const newRows = prev.rows.filter(r => r.rowNum !== rowNum);
+      return { ...prev, rows: newRows, stats: calculateStats(newRows) };
+    });
+  };
+
+  const handleSaveDraft = async () => {
+    if (!preview) return;
+    setSubmitting(true);
+    try {
+      const { data } = await client.post('/reports/import/draft', {
+        draftId: (preview as any).draftId,
+        platform: (preview as any).platform || selectedPlatform,
+        fileName: (preview as any).fileName || 'Unsaved Draft',
+        rows: preview.rows
+      });
+      toast.success('บันทึกฉบับร่างเรียบร้อย');
+      queryClient.invalidateQueries({ queryKey: ['importDrafts'] });
+      setPreview(null);
+    } catch (err) {
+      toast.error('บันทึกไม่สำเร็จ');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleResumeDraft = async (id: string) => {
+    setResumingDraftId(id);
+    try {
+      const { data } = await client.post(`/reports/import/draft/${id}/resume`);
+      setPreview(data);
+      setSelectedPlatform(data.platform);
+      setFilterTab('all');
+    } catch (err) {
+      toast.error('ไม่สามารถเรียกคืนฉบับร่างได้');
+    } finally {
+      setResumingDraftId(null);
+    }
+  };
+
+  const handleDeleteDraft = async (id: string) => {
+    if (!confirm('ลบฉบับร่างนี้ทิ้งอย่างถาวร?')) return;
+    try {
+      await client.delete(`/reports/import/draft/${id}`);
+      queryClient.invalidateQueries({ queryKey: ['importDrafts'] });
+      toast.success('ลบฉบับร่างเรียบร้อย');
+    } catch (err) {
+      toast.error('ลบไม่สำเร็จ');
+    }
   };
 
   const handleSubmit = async () => {
@@ -90,6 +191,32 @@ export default function ImportSales() {
         <FileUp className="text-blue-600" size={22} />
         <h1 className="text-xl font-bold text-gray-800">นำเข้าข้อมูลการขาย</h1>
       </div>
+
+      {drafts && drafts.length > 0 && (
+        <div className="card space-y-4 border-orange-200">
+          <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+            <Clock size={20} className="text-orange-500" /> ฉบับร่างที่บันทึกไว้
+          </h2>
+          <div className="divide-y divide-gray-100 border rounded-lg bg-white overflow-hidden">
+            {drafts.map((d: any) => (
+              <div key={d.id} className="p-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
+                <div>
+                  <p className="font-semibold text-gray-800 truncate max-w-sm" title={d.fileName}>{d.fileName}</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                     แพลตฟอร์ม: {PLATFORMS.find(p => p.id === d.platform)?.name || d.platform} • บันทึกเวลา: {new Date(d.updatedAt).toLocaleString('th-TH')}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => handleDeleteDraft(d.id)} className="btn-secondary text-red-600 border-red-200 px-3 hover:bg-red-50 hover:border-red-300">ลบ</button>
+                  <button onClick={() => handleResumeDraft(d.id)} disabled={resumingDraftId === d.id} className="btn-secondary px-4 border-orange-200 text-orange-700 hover:bg-orange-50 hover:border-orange-300">
+                    {resumingDraftId === d.id ? 'กำลังโหลด...' : 'ทำต่อ'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Upload Card */}
       <div className="card space-y-4">
@@ -151,7 +278,7 @@ export default function ImportSales() {
               <FileSpreadsheet className="text-blue-600" size={24} />
               <div>
                 <h2 className="text-lg font-bold text-gray-800">ตัวอย่างข้อมูลนำเข้า</h2>
-                <p className="text-xs text-gray-500">{file?.name}</p>
+                <p className="text-xs text-gray-500">{(preview as any).fileName || file?.name || 'Draft'}</p>
               </div>
             </div>
             <button onClick={() => setPreview(null)} className="text-gray-400 hover:text-gray-700"><X size={22} /></button>
@@ -196,11 +323,12 @@ export default function ImportSales() {
                   <th className="table-header w-12">#</th>
                   <th className="table-header">วันที่ขาย</th>
                   <th className="table-header">สาขา</th>
-                  <th className="table-header">สินค้า</th>
+                  <th className="table-header w-64">สินค้า</th>
                   <th className="table-header text-right">จำนวน</th>
                   <th className="table-header text-right">ราคา</th>
                   <th className="table-header text-center">สถานะ</th>
                   <th className="table-header">หมายเหตุ</th>
+                  <th className="table-header w-10"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -213,20 +341,32 @@ export default function ImportSales() {
                       {row.saleDate ? <span className="font-medium">{row.saleDate}</span> : <span className="text-orange-500">{row.rawDate || '—'}</span>}
                     </td>
                     <td className="table-cell">
-                      {row.branchId ? (
-                        <span className="font-medium">{row.branchName}</span>
+                      {row.status === 'matched' ? (
+                        row.branchId ? (
+                          <span className="font-medium">{row.branchName}</span>
+                        ) : (
+                          <span className="text-orange-500">{row.rawBranch || '—'}</span>
+                        )
                       ) : (
-                        <span className="text-orange-500">{row.rawBranch || '—'}</span>
+                        <input type="text" className="w-full text-xs border rounded px-2 py-1 bg-white focus:ring-1 focus:ring-blue-400 outline-none transition-shadow" 
+                          defaultValue={row.rawBranch} 
+                          onBlur={(e) => handleRefreshRow(row.rowNum, 'rawBranch', e.target.value)} 
+                          placeholder="รหัส/ชื่อสาขา" 
+                        />
                       )}
                     </td>
                     <td className="table-cell">
-                      {row.itemId ? (
+                      {row.status === 'matched' ? (
                         <div>
-                          <div className="font-medium text-xs">{row.itemName}</div>
+                          <div className="font-medium text-xs truncate w-56" title={row.itemName}>{row.itemName}</div>
                           <div className="text-gray-400 text-xs font-mono">{row.itemSku || row.itemBarcode}</div>
                         </div>
                       ) : (
-                        <span className="text-yellow-600">{row.rawItem || '—'}</span>
+                        <input type="text" className="w-full text-xs font-mono border rounded px-2 py-1 bg-white focus:ring-1 focus:ring-blue-400 outline-none transition-shadow" 
+                          defaultValue={row.rawItem} 
+                          onBlur={(e) => handleRefreshRow(row.rowNum, 'rawItem', e.target.value)} 
+                          placeholder="รหัส/บาร์โค้ดสินค้า" 
+                        />
                       )}
                     </td>
                     <td className="table-cell text-right font-mono">{row.qty}</td>
@@ -238,6 +378,11 @@ export default function ImportSales() {
                       </span>
                     </td>
                     <td className="table-cell text-xs text-gray-400">{row.errors.join(', ') || '—'}</td>
+                    <td className="table-cell text-center">
+                      <button onClick={() => handleDeleteRow(row.rowNum)} className="text-red-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded transition-colors" title="ลบข้อมูลแถวนี้">
+                        <Trash2 size={16} />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -246,21 +391,29 @@ export default function ImportSales() {
 
           {/* Footer */}
           <div className="bg-white border-t px-6 py-4 flex items-center justify-between shrink-0">
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-gray-500 shrink-0">
               จะนำเข้า <span className="font-bold text-green-600">{preview.stats.matched}</span> แถว
               {preview.stats.unmatched > 0 && (
-                <span className="ml-2 text-orange-500">• ข้าม {preview.stats.unmatched} แถวที่จับคู่ไม่ได้</span>
+                <span className="ml-2 text-orange-500 hidden sm:inline">• ข้าม {preview.stats.unmatched} แถวที่จับคู่ไม่ได้</span>
               )}
             </p>
-            <div className="flex gap-3">
+            <div className="flex gap-2 sm:gap-3 flex-wrap justify-end">
               <button onClick={() => setPreview(null)} className="btn-secondary">ยกเลิก</button>
+              <button 
+                onClick={handleSaveDraft} 
+                className="btn-secondary flex items-center gap-1.5 sm:gap-2 text-gray-700 bg-gray-50 hover:bg-gray-100 hover:border-gray-300"
+                title="บันทึกข้อมูลเก็บไว้จัดการต่อภายหลัง"
+              >
+                <Save size={16} />
+                <span className="hidden sm:inline">บันทึกร่าง</span>
+              </button>
               <button
                 onClick={handleSubmit}
                 disabled={submitting || preview.stats.matched === 0}
-                className="btn-primary flex items-center gap-2"
+                className="btn-primary flex items-center gap-1.5 sm:gap-2"
               >
                 <CheckCircle2 size={16} />
-                {submitting ? 'กำลังนำเข้า...' : `นำเข้า ${preview.stats.matched} แถว`}
+                {submitting ? 'กำลังนำเข้า...' : `นำเข้า ${preview.stats.matched} บิล`}
               </button>
             </div>
           </div>

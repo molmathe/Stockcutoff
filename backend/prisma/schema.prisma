@@ -41,9 +41,10 @@ model User {
   branch    Branch?  @relation(fields: [branchId], references: [id])
   active    Boolean  @default(true)
   isSystem  Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  bills     Bill[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  bills        Bill[]
+  importDrafts ImportDraft[]
 }
 
 model Branch {
@@ -120,4 +121,17 @@ model BillItem {
 
   @@index([billId])
   @@index([itemId])
+}
+
+model ImportDraft {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  platform  String
+  fileName  String
+  rowsData  Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }
