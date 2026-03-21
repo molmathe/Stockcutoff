@@ -527,6 +527,136 @@ router.post('/import/match', authenticate, requireAdmin, async (req: AuthRequest
   }
 });
 
+// ─── Unresolved Sales ────────────────────────────────────────────────────────
+
+router.get('/unresolved-sales', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const records = await prisma.unresolvedSale.findMany({
+      where: { status: 'PENDING' },
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(records);
+  } catch (e) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.delete('/unresolved-sales/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    await prisma.unresolvedSale.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.put('/unresolved-sales/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { rawBranch, rawItem } = req.body;
+    await prisma.unresolvedSale.update({
+      where: { id: req.params.id },
+      data: {
+        rawBranch: rawBranch !== undefined ? String(rawBranch) : undefined,
+        rawItem: rawItem !== undefined ? String(rawItem) : undefined
+      }
+    });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to update' });
+  }
+});
+
+router.post('/unresolved-sales/auto-match', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const records = await prisma.unresolvedSale.findMany({ where: { status: 'PENDING' } });
+    if (records.length === 0) return res.json([]);
+
+    // Format for our matcher
+    const inputRows = records.map(r => ({
+      rowNum: r.id as any,
+      rawDate: r.rawDate,
+      saleDate: r.saleDate,
+      rawBranch: r.rawBranch,
+      rawItem: r.rawItem,
+      qty: r.qty,
+      price: Number(r.price)
+    }));
+
+    const result = await remapImportRows(inputRows, 10000);
+    
+    // Attach match info back to the unresolved sale record
+    const remapped = records.map(r => {
+      const match = result.rows.find(x => x.rowNum === r.id);
+      return { ...r, match };
+    });
+    
+    res.json(remapped);
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to auto-match' });
+  }
+});
+
+router.post('/unresolved-sales/resolve', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { resolves } = req.body; // Array of { id, branchId, itemId }
+    if (!resolves || !Array.isArray(resolves)) return res.status(400).json({ error: 'Invalid payload' });
+
+    let importedCount = 0;
+
+    for (const r of resolves) {
+      const record = await prisma.unresolvedSale.findUnique({ where: { id: r.id } });
+      if (!record || record.status !== 'PENDING') continue;
+
+      const branch = await prisma.branch.findUnique({ where: { id: r.branchId } });
+      const item = await prisma.item.findUnique({ where: { id: r.itemId } });
+      if (!branch || !item) continue;
+
+      const dateStr = record.saleDate || new Date().toISOString().split('T')[0];
+      const parsedDate = new Date(dateStr);
+      parsedDate.setUTCHours(0,0,0,0);
+
+      const billNumber = generateImportBillNumber(parsedDate);
+      const totalString = (record.qty * Number(record.price)).toFixed(2);
+
+      await prisma.bill.create({
+        data: {
+          billNumber,
+          branchId: branch.id,
+          userId: req.user!.id,
+          status: 'SUBMITTED',
+          source: 'IMPORT',
+          saleDate: parsedDate,
+          subtotal: totalString,
+          discount: '0',
+          total: totalString,
+          notes: `Import Platform: ${record.platform} | UnresolvedSale ID: ${record.id}`,
+          importPlatform: record.platform,
+          submittedAt: new Date(),
+          items: {
+            create: {
+              itemId: item.id,
+              quantity: record.qty,
+              price: record.price,
+              discount: '0',
+              subtotal: totalString
+            }
+          }
+        }
+      });
+
+      await prisma.unresolvedSale.update({
+        where: { id: record.id },
+        data: { status: 'RESOLVED' }
+      });
+      importedCount++;
+    }
+
+    res.json({ success: true, imported: importedCount });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to resolve sales' });
+  }
+});
+
 // ─── Import Preview ──────────────────────────────────────────────────────────
 
 router.post('/import/preview', authenticate, requireAdmin, importUpload.single('file'), async (req: AuthRequest, res: Response) => {
@@ -550,7 +680,7 @@ router.post('/import/preview', authenticate, requireAdmin, importUpload.single('
 
 router.post('/import/submit', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const { rows, platform } = req.body as {
+    const { rows, platform, unmatchedRows, fileName } = req.body as {
       rows: Array<{
         saleDate: string;
         branchId: string;
@@ -559,12 +689,16 @@ router.post('/import/submit', authenticate, requireAdmin, async (req: AuthReques
         price: number;
       }>;
       platform: ImportPlatform;
+      unmatchedRows?: any[];
+      fileName?: string;
     };
 
     if (!Array.isArray(rows) || rows.length === 0) {
-      return res.status(400).json({ error: 'ไม่มีข้อมูลนำเข้า' });
+      if (!unmatchedRows || unmatchedRows.length === 0) {
+        return res.status(400).json({ error: 'ไม่มีข้อมูลนำเข้า' });
+      }
     }
-    if (rows.length > MAX_IMPORT_ROWS) {
+    if (rows && rows.length > MAX_IMPORT_ROWS) {
       return res.status(400).json({ error: `ข้อมูลเกิน ${MAX_IMPORT_ROWS} แถว กรุณาแบ่งนำเข้าทีละส่วน` });
     }
 
@@ -627,10 +761,28 @@ router.post('/import/submit', authenticate, requireAdmin, async (req: AuthReques
       createdCount++;
     }
 
+    if (unmatchedRows && unmatchedRows.length > 0) {
+      await prisma.unresolvedSale.createMany({
+        data: unmatchedRows.map((r: any) => ({
+          userId: req.user!.id,
+          platform: String(platform),
+          fileName: fileName || 'Unknown File',
+          saleDate: r.saleDate?.toString() || null,
+          rawDate: r.rawDate?.toString() || null,
+          rawBranch: r.rawBranch?.toString() || null,
+          rawItem: r.rawItem?.toString() || null,
+          qty: Number(r.qty) || 0,
+          price: Number(r.price) || 0,
+          errors: r.errors || [],
+          status: 'PENDING'
+        }))
+      });
+    }
+
     res.json({
-      message: `นำเข้าสำเร็จ: ${rows.length} รายการ (${createdCount} บิล)`,
+      message: `นำเข้าสำเร็จ: ${rows?.length || 0} รายการ (${createdCount} บิล)${unmatchedRows?.length ? ` (และมียอดตกหล่น ${unmatchedRows.length} รายการรอจัดการทีหลัง)` : ''}`,
       billsCreated: createdCount,
-      rowsImported: rows.length,
+      rowsImported: rows?.length || 0,
     });
   } catch (e) {
     console.error(e);

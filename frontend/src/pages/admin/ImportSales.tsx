@@ -162,12 +162,18 @@ export default function ImportSales() {
   const handleSubmit = async () => {
     if (!preview) return;
     const matchedRows = preview.rows.filter((r) => r.status === 'matched');
+    const unmatchedRows = preview.rows.filter((r) => r.status !== 'matched');
     if (matchedRows.length === 0) { toast.error('ไม่มีแถวที่จับคู่ได้'); return; }
     if (!confirm(`นำเข้าข้อมูล ${matchedRows.length} แถว ยืนยัน?`)) return;
     setSubmitting(true);
     try {
-      const { data } = await client.post('/reports/import/submit', { rows: matchedRows, platform: selectedPlatform });
-      toast.success(data.message || `นำเข้า ${data.count} บิลเรียบร้อย`);
+      const { data } = await client.post('/reports/import/submit', { 
+        rows: matchedRows, 
+        platform: selectedPlatform,
+        unmatchedRows,
+        fileName: (preview as any).fileName || file?.name
+      });
+      toast.success(data.message || `นำเข้าเรียบร้อย`);
       setPreview(null);
       setFile(null);
       if (fileRef.current) fileRef.current.value = '';

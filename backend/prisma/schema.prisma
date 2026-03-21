@@ -42,9 +42,10 @@ model User {
   active    Boolean  @default(true)
   isSystem  Boolean  @default(false)
   createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-  bills        Bill[]
-  importDrafts ImportDraft[]
+  updatedAt      DateTime         @updatedAt
+  bills          Bill[]
+  importDrafts   ImportDraft[]
+  unresolvedSales UnresolvedSale[]
 }
 
 model Branch {
@@ -133,5 +134,29 @@ model ImportDraft {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([userId])
+}
+
+model UnresolvedSale {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id])
+  platform     String
+  fileName     String
+  
+  saleDate     String?
+  rawDate      String?
+  rawBranch    String?
+  rawItem      String?
+  qty          Int
+  price        Decimal   @db.Decimal(10,2)
+  
+  status       String    @default("PENDING")
+  errors       Json
+  
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([status])
   @@index([userId])
 }
