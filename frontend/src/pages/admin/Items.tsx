@@ -787,7 +787,7 @@ export default function Items() {
               <button onClick={() => setShowImport(false)} className="btn-secondary">ยกเลิก</button>
               <button 
                 onClick={handleImportSubmit} 
-                disabled={!importFile || importPreview.length === 0 || importMutation.isPending || importPreview.some(r => r.status === 'invalid')} 
+                disabled={!importFile || importPreview.length === 0 || importMutation.isPending || importPreview.filter(r => r.status !== 'invalid').length === 0}
                 className="btn-primary flex items-center gap-2"
               >
                 {importMutation.isPending ? 'กำลังประมวลผล...' : `ยืนยันการนำเข้า ${importPreview.filter(r => r.status !== 'invalid').length} รายการ`}

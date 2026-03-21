@@ -749,7 +749,7 @@ router.post('/import/preview', authenticate, requireAdmin, importUpload.single('
 
 router.post('/import/submit', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const { rows, platform, unmatchedRows, fileName } = req.body as {
+    const { rows, platform, unmatchedRows, fileName, draftId } = req.body as {
       rows: Array<{
         saleDate: string;
         branchId: string;
@@ -760,6 +760,7 @@ router.post('/import/submit', authenticate, requireAdmin, async (req: AuthReques
       platform: ImportPlatform;
       unmatchedRows?: any[];
       fileName?: string;
+      draftId?: string;
     };
 
     if (!Array.isArray(rows) || rows.length === 0) {
@@ -856,6 +857,11 @@ router.post('/import/submit', authenticate, requireAdmin, async (req: AuthReques
           status: 'PENDING'
         }))
       });
+    }
+
+    // Auto-delete draft after successful submit
+    if (draftId) {
+      await prisma.importDraft.deleteMany({ where: { id: draftId } });
     }
 
     res.json({

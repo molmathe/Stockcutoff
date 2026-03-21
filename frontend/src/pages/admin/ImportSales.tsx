@@ -167,11 +167,12 @@ export default function ImportSales() {
     if (!confirm(`นำเข้าข้อมูล ${matchedRows.length} แถว ยืนยัน?`)) return;
     setSubmitting(true);
     try {
-      const { data } = await client.post('/reports/import/submit', { 
-        rows: matchedRows, 
+      const { data } = await client.post('/reports/import/submit', {
+        rows: matchedRows,
         platform: selectedPlatform,
         unmatchedRows,
-        fileName: (preview as any).fileName || file?.name
+        fileName: (preview as any).fileName || file?.name,
+        draftId: (preview as any).draftId,
       });
       toast.success(data.message || `นำเข้าเรียบร้อย`);
       setPreview(null);
