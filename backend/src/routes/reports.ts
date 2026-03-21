@@ -4,6 +4,7 @@ import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import prisma from '../lib/prisma';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
+import { parseExcelData, ImportPlatform } from '../lib/excelParsers';
 
 const router = Router();
 const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
@@ -95,6 +96,83 @@ function generateImportBillNumber(date: Date): string {
   return `IMP${d}-${uuidv4().split('-')[0].toUpperCase().slice(0, 5)}`;
 }
 
+async function remapImportRows(inputRows: any[], maxRows = 10000) {
+  const allBranches = await prisma.branch.findMany({ where: { active: true } });
+  const allItems = await prisma.item.findMany({ where: { active: true } });
+
+  const rows: any[] = [];
+  let totalQty = 0;
+  let totalRevenue = 0;
+  let matched = 0;
+  let rowCount = 0;
+
+  for (const r of inputRows) {
+    if (rowCount >= maxRows) break;
+    rowCount++;
+
+    let branch = null;
+    let item = null;
+
+    if (r.rawBranch) {
+      const v = String(r.rawBranch).trim().toLowerCase();
+      branch = allBranches.find(b =>
+          b.name.toLowerCase() === v ||
+          b.code.toLowerCase() === v ||
+          (b.reportBranchId && b.reportBranchId.toLowerCase() === v) ||
+          (b.bigsellerBranchId && b.bigsellerBranchId.toLowerCase() === v) ||
+          (b.tags && b.tags.some(tag => tag.toLowerCase() === v))
+      ) || null;
+    }
+
+    if (r.rawItem) {
+      const v = String(r.rawItem).trim().toLowerCase();
+      item = allItems.find(i =>
+          i.sku.toLowerCase() === v ||
+          i.barcode.toLowerCase() === v
+      ) || null;
+    }
+
+    const errors: string[] = [];
+    if (!r.saleDate) errors.push('วันที่ไม่ถูกต้อง');
+    if (r.qty <= 0) errors.push('จำนวนต้องมากว่า 0');
+    if (r.price < 0) errors.push('ราคาไม่ถูกต้อง');
+    if (!branch && r.rawBranch) errors.push(`ไม่พบสาขา: ${r.rawBranch}`);
+    if (!item && r.rawItem) errors.push(`ไม่พบสินค้า: ${r.rawItem}`);
+
+    const isMatched = !!(r.saleDate && branch && item && r.qty > 0 && r.price >= 0 && errors.length === 0);
+
+    if (isMatched) {
+      matched++;
+      totalQty += r.qty;
+      totalRevenue += r.qty * r.price;
+    }
+
+    rows.push({
+      rowNum: r.rowNum || rowCount,
+      rawDate: r.rawDate,
+      saleDate: r.saleDate ? (typeof r.saleDate === 'string' ? r.saleDate : r.saleDate.toISOString().split('T')[0]) : null,
+      rawBranch: r.rawBranch,
+      branchId: branch?.id || null,
+      branchName: branch?.name || r.rawBranch,
+      rawItem: r.rawItem,
+      itemId: item?.id || null,
+      itemName: item?.name || '',
+      itemSku: item?.sku || '',
+      itemBarcode: item?.barcode || '',
+      qty: r.qty,
+      price: r.price,
+      status: isMatched ? 'matched' : errors.length ? 'invalid' : (!branch ? 'no_branch' : 'no_item'),
+      errors,
+    });
+  }
+
+  const truncated = rowCount >= maxRows;
+  return {
+    rows,
+    stats: { total: rows.length, matched, unmatched: rows.length - matched, totalQty, totalRevenue, truncated, maxRows },
+  };
+}
+
 // ─── Dashboard ──────────────────────────────────────────────────────────────
 
 router.get('/dashboard', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
@@ -103,16 +181,21 @@ router.get('/dashboard', authenticate, requireAdmin, async (req: AuthRequest, re
     const { today, tomorrow } = getThaiDayRange();
     const sevenDaysAgo = new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000);
 
+    const dateFilterToday = { gte: today, lt: tomorrow };
+    const dateFilter7Days = { gte: sevenDaysAgo };
+    const whereToday: any = { ...bw, status: 'SUBMITTED', OR: [{ saleDate: null, createdAt: dateFilterToday }, { saleDate: dateFilterToday }] };
+    const where7Days: any = { ...bw, status: 'SUBMITTED', OR: [{ saleDate: null, createdAt: dateFilter7Days }, { saleDate: dateFilter7Days }] };
+
     const [todayBills, recentBills, allBillsForItems] = await Promise.all([
       prisma.bill.findMany({
-        where: { ...bw, status: 'SUBMITTED', createdAt: { gte: today, lt: tomorrow } },
+        where: whereToday,
         include: { items: true },
       }),
       prisma.bill.findMany({
-        where: { ...bw, status: 'SUBMITTED', createdAt: { gte: sevenDaysAgo } },
+        where: where7Days,
       }),
       prisma.bill.findMany({
-        where: { ...bw, status: 'SUBMITTED', createdAt: { gte: sevenDaysAgo } },
+        where: where7Days,
         include: { items: { include: { item: { select: { name: true, sku: true, barcode: true, imageUrl: true } } } } },
       }),
     ]);
@@ -129,7 +212,8 @@ router.get('/dashboard', authenticate, requireAdmin, async (req: AuthRequest, re
       dayMap[thaiKey] = { revenue: 0, bills: 0 };
     }
     for (const b of recentBills) {
-      const key = new Date(b.createdAt.getTime() + THAI_OFFSET_MS).toISOString().split('T')[0];
+      const recordDate = b.saleDate || b.createdAt;
+      const key = new Date(recordDate.getTime() + THAI_OFFSET_MS).toISOString().split('T')[0];
       if (dayMap[key]) { dayMap[key].revenue += Number(b.total); dayMap[key].bills++; }
     }
     const revenueByDay = Object.entries(dayMap).map(([date, v]) => ({ date, ...v }));
@@ -158,7 +242,7 @@ router.get('/dashboard', authenticate, requireAdmin, async (req: AuthRequest, re
         prisma.branch.findMany({ where: { active: true }, select: { id: true, name: true } }),
         prisma.bill.groupBy({
           by: ['branchId'],
-          where: { status: 'SUBMITTED', createdAt: { gte: sevenDaysAgo } },
+          where: where7Days,
           _sum: { total: true },
           _count: true,
         }),
@@ -503,147 +587,233 @@ router.get('/export-bigseller', authenticate, requireAdmin, async (req: AuthRequ
   }
 });
 
+// ─── Import Drafts ────────────────────────────────────────────────────────────
+
+router.get('/import/drafts', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const drafts = await prisma.importDraft.findMany({
+      where: { userId: req.user!.id },
+      orderBy: { updatedAt: 'desc' }
+    });
+    const summary = drafts.map(d => ({
+      id: d.id, platform: d.platform, fileName: d.fileName, createdAt: d.createdAt, updatedAt: d.updatedAt
+    }));
+    res.json(summary);
+  } catch (e) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.post('/import/draft', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { platform, fileName, rows } = req.body;
+    let draftId = req.body.draftId;
+
+    if (draftId) {
+      await prisma.importDraft.update({
+        where: { id: draftId },
+        data: { rowsData: rows, updatedAt: new Date() }
+      });
+    } else {
+      const draft = await prisma.importDraft.create({
+        data: { userId: req.user!.id, platform, fileName, rowsData: rows }
+      });
+      draftId = draft.id;
+    }
+    res.json({ success: true, draftId });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to save draft' });
+  }
+});
+
+router.post('/import/draft/:id/resume', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const draft = await prisma.importDraft.findUnique({ where: { id: req.params.id } });
+    if (!draft) return res.status(404).json({ error: 'Not found' });
+
+    // We treat the saved rows as raw input lines mapped by old mapping, but we re-map them entirely!
+    const result = await remapImportRows(draft.rowsData as any[], MAX_IMPORT_ROWS);
+
+    res.json({
+      draftId: draft.id,
+      platform: draft.platform,
+      fileName: draft.fileName,
+      ...result
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to resume draft' });
+  }
+});
+
+router.delete('/import/draft/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    await prisma.importDraft.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.post('/import/match', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const result = await remapImportRows([req.body], 1);
+    res.json(result.rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: 'Mapping lookup failed' });
+  }
+});
+
+// ─── Unresolved Sales ────────────────────────────────────────────────────────
+
+router.get('/unresolved-sales', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const records = await prisma.unresolvedSale.findMany({
+      where: { status: 'PENDING' },
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(records);
+  } catch (e) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.delete('/unresolved-sales/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    await prisma.unresolvedSale.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.put('/unresolved-sales/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { rawBranch, rawItem } = req.body;
+    await prisma.unresolvedSale.update({
+      where: { id: req.params.id },
+      data: {
+        rawBranch: rawBranch !== undefined ? String(rawBranch) : undefined,
+        rawItem: rawItem !== undefined ? String(rawItem) : undefined
+      }
+    });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to update' });
+  }
+});
+
+router.post('/unresolved-sales/auto-match', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const records = await prisma.unresolvedSale.findMany({ where: { status: 'PENDING' } });
+    if (records.length === 0) return res.json([]);
+
+    // Format for our matcher
+    const inputRows = records.map(r => ({
+      rowNum: r.id as any,
+      rawDate: r.rawDate,
+      saleDate: r.saleDate,
+      rawBranch: r.rawBranch,
+      rawItem: r.rawItem,
+      qty: r.qty,
+      price: Number(r.price)
+    }));
+
+    const result = await remapImportRows(inputRows, 10000);
+
+    // Attach match info back to the unresolved sale record
+    const remapped = records.map(r => {
+      const match = result.rows.find(x => x.rowNum === r.id);
+      return { ...r, match };
+    });
+
+    res.json(remapped);
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to auto-match' });
+  }
+});
+
+router.post('/unresolved-sales/resolve', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { resolves } = req.body; // Array of { id, branchId, itemId }
+    if (!resolves || !Array.isArray(resolves)) return res.status(400).json({ error: 'Invalid payload' });
+
+    let importedCount = 0;
+
+    for (const r of resolves) {
+      const record = await prisma.unresolvedSale.findUnique({ where: { id: r.id } });
+      if (!record || record.status !== 'PENDING') continue;
+
+      const branch = await prisma.branch.findUnique({ where: { id: r.branchId } });
+      const item = await prisma.item.findUnique({ where: { id: r.itemId } });
+      if (!branch || !item) continue;
+
+      const dateStr = record.saleDate || new Date().toISOString().split('T')[0];
+      const parsedDate = new Date(dateStr);
+      parsedDate.setUTCHours(0,0,0,0);
+
+      const billNumber = generateImportBillNumber(parsedDate);
+      const totalString = (record.qty * Number(record.price)).toFixed(2);
+
+      await prisma.bill.create({
+        data: {
+          billNumber,
+          branchId: branch.id,
+          userId: req.user!.id,
+          status: 'SUBMITTED',
+          source: 'IMPORT',
+          saleDate: parsedDate,
+          subtotal: totalString,
+          discount: '0',
+          total: totalString,
+          notes: `Import Platform: ${record.platform} | UnresolvedSale ID: ${record.id}`,
+          importPlatform: record.platform,
+          submittedAt: new Date(),
+          items: {
+            create: {
+              itemId: item.id,
+              quantity: record.qty,
+              price: record.price,
+              discount: '0',
+              subtotal: totalString
+            }
+          }
+        }
+      });
+
+      await prisma.item.update({
+        where: { id: item.id },
+        data: { saleDate: parsedDate },
+      });
+
+      await prisma.unresolvedSale.update({
+        where: { id: record.id },
+        data: { status: 'RESOLVED' }
+      });
+      importedCount++;
+    }
+
+    res.json({ success: true, imported: importedCount });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to resolve sales' });
+  }
+});
+
 // ─── Import Preview ──────────────────────────────────────────────────────────
 
 router.post('/import/preview', authenticate, requireAdmin, importUpload.single('file'), async (req: AuthRequest, res: Response) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'กรุณาอัพโหลดไฟล์ Excel' });
-    const { templateId } = req.body;
-    if (!templateId) return res.status(400).json({ error: 'กรุณาเลือกเทมเพลต' });
+    const { platform } = req.body;
+    if (!platform || !['CENTRAL', 'MBK', 'PLAYHOUSE'].includes(platform)) {
+      return res.status(400).json({ error: 'กรุณาเลือกแพลตฟอร์ม' });
+    }
 
-    const template = await prisma.reportTemplate.findUnique({ where: { id: templateId } });
-    if (!template) return res.status(404).json({ error: 'ไม่พบเทมเพลต' });
-
-    const allBranches = await prisma.branch.findMany({ where: { active: true } });
-    const allItems = await prisma.item.findMany({ where: { active: true } });
-
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(req.file.buffer as any);
-    const ws = wb.worksheets[0];
-    if (!ws) return res.status(400).json({ error: 'ไม่พบชีตในไฟล์ Excel' });
-
-    const headers: string[] = [];
-    ws.getRow(1).eachCell({ includeEmpty: true }, (cell, colNum) => {
-      headers[colNum - 1] = cellStr(cell.value);
-    });
-
-    const colIdx = (name: string | null): number =>
-      name ? headers.indexOf(name) : -1;
-
-    const dateCol = colIdx(template.columnDate);
-    const barcodeCol = colIdx(template.columnBarcode);
-    const skuCol = colIdx(template.columnSku);
-    const priceCol = colIdx(template.columnPrice);
-    const qtyCol = colIdx(template.columnQty);
-    const branchIdCol = colIdx(template.columnBranchId);
-    const branchNameCol = colIdx(template.columnBranchName);
-
-    const findBranch = (branchValue: string) => {
-      if (!branchValue) return null;
-      const v = branchValue.trim();
-      switch (template.branchMatchBy) {
-        case 'name': return allBranches.find((b) => b.name === v) || null;
-        case 'code': return allBranches.find((b) => b.code === v) || null;
-        case 'reportBranchId': return allBranches.find((b) => b.reportBranchId === v) || null;
-        case 'bigsellerBranchId': return allBranches.find((b) => b.bigsellerBranchId === v) || null;
-        default: return allBranches.find((b) => b.name === v) || null;
-      }
-    };
-
-    const findItem = (itemValue: string) => {
-      if (!itemValue) return null;
-      const v = itemValue.trim();
-      if (template.itemMatchBy === 'sku') return allItems.find((i) => i.sku === v) || null;
-      return allItems.find((i) => i.barcode === v) || null;
-    };
-
-    const rows: any[] = [];
-    let totalQty = 0;
-    let totalRevenue = 0;
-    let matched = 0;
-    let rowCount = 0;
-
-    ws.eachRow((row, rowNum) => {
-      if (rowNum === 1) return; // skip header
-      if (rowCount >= MAX_IMPORT_ROWS) return; // hard cap to prevent DoS
-      rowCount++;
-
-      const getCellVal = (colIndex: number) =>
-        colIndex >= 0 ? row.getCell(colIndex + 1).value : null;
-
-      const rawBranchId = branchIdCol >= 0 ? cellStr(getCellVal(branchIdCol)) : '';
-      const rawBranchName = branchNameCol >= 0 ? cellStr(getCellVal(branchNameCol)) : '';
-      const rawBranch = rawBranchId || rawBranchName;
-
-      const rawBarcodeVal = barcodeCol >= 0 ? cellStr(getCellVal(barcodeCol)) : '';
-      const rawSkuVal = skuCol >= 0 ? cellStr(getCellVal(skuCol)) : '';
-      const rawItem = template.itemMatchBy === 'sku' ? rawSkuVal : rawBarcodeVal;
-      const rawItemFallback = rawBarcodeVal || rawSkuVal;
-
-      const rawDateVal = dateCol >= 0 ? getCellVal(dateCol) : null;
-      const rawPriceVal = getCellVal(priceCol);
-      const rawQtyVal = getCellVal(qtyCol);
-
-      if (!rawBranch && !rawItem && !rawDateVal && !rawPriceVal && !rawQtyVal) return;
-
-      const saleDate = parseExcelDate(rawDateVal);
-      const qty = parseFloat(cellStr(rawQtyVal)) || 0;
-      const price = parseFloat(cellStr(rawPriceVal)) || 0;
-      const errors: string[] = [];
-
-      if (!saleDate) errors.push('วันที่ไม่ถูกต้อง');
-      if (qty <= 0) errors.push('จำนวนต้องมากกว่า 0');
-      if (price < 0) errors.push('ราคาไม่ถูกต้อง');
-
-      const branch = findBranch(rawBranch);
-      const item = findItem(rawItem || rawItemFallback);
-
-      if (!branch && rawBranch) errors.push(`ไม่พบสาขา: ${rawBranch}`);
-      if (!item && rawItem) errors.push(`ไม่พบสินค้า: ${rawItem || rawItemFallback}`);
-
-      const isMatched = !!saleDate && !!branch && !!item && qty > 0 && price >= 0 && errors.length === 0;
-
-      if (isMatched) {
-        matched++;
-        totalQty += qty;
-        totalRevenue += qty * price;
-      }
-
-      rows.push({
-        rowNum,
-        rawDate: cellStr(rawDateVal),
-        saleDate: saleDate ? saleDate.toISOString().split('T')[0] : null,
-        rawBranch,
-        branchId: branch?.id || null,
-        branchName: branch?.name || rawBranch,
-        rawItem: rawItem || rawItemFallback,
-        itemId: item?.id || null,
-        itemName: item?.name || '',
-        itemSku: item?.sku || rawSkuVal,
-        itemBarcode: item?.barcode || rawBarcodeVal,
-        qty,
-        price,
-        status: isMatched ? 'matched' : errors.length ? 'invalid' : (!branch ? 'no_branch' : 'no_item'),
-        errors,
-      });
-    });
-
-    const truncated = rowCount >= MAX_IMPORT_ROWS;
-    res.json({
-      rows,
-      stats: {
-        total: rows.length,
-        matched,
-        unmatched: rows.length - matched,
-        totalQty,
-        totalRevenue,
-        truncated,
-        maxRows: MAX_IMPORT_ROWS,
-      },
-    });
+    const parsedRows = await parseExcelData(req.file.buffer, platform as ImportPlatform);
+    const result = await remapImportRows(parsedRows, MAX_IMPORT_ROWS);
+    res.json(result);
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: 'ประมวลผลไฟล์ไม่สำเร็จ' });
+    res.status(500).json({ error: 'ประมวลผลไฟล์ไม่สำเร็จ: ' + (e as Error).message });
   }
 });
 
@@ -651,7 +821,7 @@ router.post('/import/preview', authenticate, requireAdmin, importUpload.single('
 
 router.post('/import/submit', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const { rows } = req.body as {
+    const { rows, platform, unmatchedRows, fileName } = req.body as {
       rows: Array<{
         saleDate: string;
         branchId: string;
@@ -659,12 +829,17 @@ router.post('/import/submit', authenticate, requireAdmin, async (req: AuthReques
         qty: number;
         price: number;
       }>;
+      platform: ImportPlatform;
+      unmatchedRows?: any[];
+      fileName?: string;
     };
 
     if (!Array.isArray(rows) || rows.length === 0) {
-      return res.status(400).json({ error: 'ไม่มีข้อมูลนำเข้า' });
+      if (!unmatchedRows || unmatchedRows.length === 0) {
+        return res.status(400).json({ error: 'ไม่มีข้อมูลนำเข้า' });
+      }
     }
-    if (rows.length > MAX_IMPORT_ROWS) {
+    if (rows && rows.length > MAX_IMPORT_ROWS) {
       return res.status(400).json({ error: `ข้อมูลเกิน ${MAX_IMPORT_ROWS} แถว กรุณาแบ่งนำเข้าทีละส่วน` });
     }
 
@@ -706,6 +881,7 @@ router.post('/import/submit', authenticate, requireAdmin, async (req: AuthReques
           userId: req.user!.id,
           status: 'SUBMITTED',
           source: 'IMPORT',
+          importPlatform: platform || null,
           saleDate: group.saleDate,
           subtotal,
           discount: 0,
@@ -723,13 +899,41 @@ router.post('/import/submit', authenticate, requireAdmin, async (req: AuthReques
           },
         },
       });
+
+      await Promise.all(
+        group.items.map((r) =>
+          prisma.item.update({
+            where: { id: r.itemId },
+            data: { saleDate: group.saleDate },
+          })
+        )
+      );
+
       createdCount++;
     }
 
+    if (unmatchedRows && unmatchedRows.length > 0) {
+      await prisma.unresolvedSale.createMany({
+        data: unmatchedRows.map((r: any) => ({
+          userId: req.user!.id,
+          platform: String(platform),
+          fileName: fileName || 'Unknown File',
+          saleDate: r.saleDate?.toString() || null,
+          rawDate: r.rawDate?.toString() || null,
+          rawBranch: r.rawBranch?.toString() || null,
+          rawItem: r.rawItem?.toString() || null,
+          qty: Number(r.qty) || 0,
+          price: Number(r.price) || 0,
+          errors: r.errors || [],
+          status: 'PENDING'
+        }))
+      });
+    }
+
     res.json({
-      message: `นำเข้าสำเร็จ: ${rows.length} รายการ (${createdCount} บิล)`,
+      message: `นำเข้าสำเร็จ: ${rows?.length || 0} รายการ (${createdCount} บิล)${unmatchedRows?.length ? ` (และมียอดตกหล่น ${unmatchedRows.length} รายการรอจัดการทีหลัง)` : ''}`,
       billsCreated: createdCount,
-      rowsImported: rows.length,
+      rowsImported: rows?.length || 0,
     });
   } catch (e) {
     console.error(e);

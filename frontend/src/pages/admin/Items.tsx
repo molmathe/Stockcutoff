@@ -56,14 +56,15 @@ export default function Items() {
 
   const [selected, setSelected] = useState<string[]>([]);
   const [showModal, setShowModal] = useState(false);
-  const [showImport, setShowImport] = useState(false);
-  const [showBulkImage, setShowBulkImage] = useState(false);
   const [editing, setEditing] = useState<Item | null>(null);
   const [form, setForm] = useState({ ...EMPTY });
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imgDragOver, setImgDragOver] = useState(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
-  const [importText, setImportText] = useState('');
+  const [showImport, setShowImport] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreview, setImportPreview] = useState<any[]>([]);
+  const [showBulkImage, setShowBulkImage] = useState(false);
 
   // Bulk image drag-drop state
   const [dragOver, setDragOver] = useState(false);
@@ -141,13 +142,23 @@ export default function Items() {
     onError: () => toast.error('ลบหลายรายการไม่สำเร็จ'),
   });
 
+  const importPreviewMutation = useMutation({
+    mutationFn: (fd: FormData) => client.post('/items/import/preview', fd, { headers: { 'Content-Type': 'multipart/form-data' } }),
+    onSuccess: ({ data }) => {
+      setImportPreview(data);
+      toast.success('วิเคราะห์ไฟล์เรียบร้อย');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error || 'วิเคราะห์ไฟล์ไม่สำเร็จ'),
+  });
+
   const importMutation = useMutation({
     mutationFn: (rows: any[]) => client.post('/items/bulk-import', { items: rows }),
     onSuccess: ({ data }) => {
       qc.invalidateQueries({ queryKey: ['items'] });
       toast.success(data.message);
       setShowImport(false);
-      setImportText('');
+      setImportFile(null);
+      setImportPreview([]);
     },
     onError: (err: any) => toast.error(err.response?.data?.error || 'นำเข้าไม่สำเร็จ'),
   });
@@ -182,18 +193,19 @@ export default function Items() {
     bulkDeleteMutation.mutate(selected);
   };
 
-  const handleImport = () => {
-    const lines = importText.trim().split('\n').filter((l) => !l.trim().startsWith('#'));
-    if (lines.length < 2) { toast.error('ไม่พบข้อมูลที่ถูกต้อง'); return; }
-    const headers = lines[0].split(',').map((h) => h.trim());
-    const rows = lines.slice(1).map((line) => {
-      const vals = line.split(',');
-      const obj: any = {};
-      headers.forEach((h, i) => obj[h] = vals[i]?.trim() || '');
-      return obj;
-    }).filter((r) => r.sku);
-    if (rows.length === 0) { toast.error('ไม่พบข้อมูลที่ถูกต้อง'); return; }
-    importMutation.mutate(rows);
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) {
+      setImportFile(f);
+      const fd = new FormData();
+      fd.append('file', f);
+      importPreviewMutation.mutate(fd);
+    }
+  };
+
+  const handleImportSubmit = () => {
+    if (importPreview.length === 0) return;
+    importMutation.mutate(importPreview);
   };
 
   // Export all items (fetches without pagination for complete dataset)
@@ -206,21 +218,7 @@ export default function Items() {
 
   const saving = saveMutation.isPending || importMutation.isPending;
 
-  const downloadTemplate = () => {
-    const csv = [
-      'sku,barcode,name,description,defaultPrice,category',
-      '# sku=รหัสสินค้า(จำเป็น) barcode=บาร์โค้ด(จำเป็น) defaultPrice=ราคา(ตัวเลข) description=รายละเอียด(ไม่จำเป็น)',
-      'ITEM001,8850001234567,ตัวอย่างสินค้า 1,รายละเอียดสินค้า,99.00,เครื่องดื่ม',
-      'ITEM002,8850009876543,ตัวอย่างสินค้า 2,,149.00,ขนม',
-    ].join('\n');
-    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'template-สินค้า.csv';
-    a.click();
-  };
-
-  // Drag-drop handlers
+  // Export all items (fetches without pagination for complete dataset)
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
   }, []);
@@ -317,8 +315,8 @@ export default function Items() {
             className="btn-secondary flex items-center gap-1">
             <Images size={16} /> อัพโหลดรูปภาพ
           </button>
-          <button onClick={() => setShowImport(true)} className="btn-secondary flex items-center gap-1">
-            <Upload size={16} /> นำเข้า CSV
+          <button onClick={() => { setShowImport(true); setImportFile(null); setImportPreview([]); }} className="btn-secondary flex items-center gap-1">
+            <Upload size={16} /> นำเข้าจาก Excel
           </button>
           <button onClick={openAdd} className="btn-primary flex items-center gap-1">
             <Plus size={16} /> เพิ่มสินค้า
@@ -662,33 +660,141 @@ export default function Items() {
         </Modal>
       )}
 
-      {/* Import CSV Modal */}
+      {/* Import Excel Modal */}
       {showImport && (
-        <Modal title="นำเข้าสินค้าจาก CSV" onClose={() => setShowImport(false)} size="lg">
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-gray-500">วางข้อมูล CSV ด้านล่าง (ต้องมีแถวหัวตาราง)</p>
-              <button onClick={downloadTemplate} className="btn-secondary text-xs flex items-center gap-1">
-                <Download size={14} /> ดาวน์โหลด Template
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-6xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-5 border-b shrink-0">
+              <h2 className="text-xl font-bold flex items-center gap-2">
+                <Upload className="text-blue-600" /> นำเข้าสินค้าจาก Excel
+              </h2>
+              <button onClick={() => setShowImport(false)} className="text-gray-400 hover:bg-gray-100 p-2 rounded-lg">
+                <X size={20} />
               </button>
             </div>
-            <div className="font-mono text-xs bg-gray-50 p-2 rounded border text-gray-600">
-              sku, barcode, name, description, defaultPrice, category
+            
+            <div className="flex-1 overflow-auto p-5">
+              {!importFile ? (
+                <div className="h-64 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center text-center cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                  onClick={() => document.getElementById('excel-upload')?.click()}>
+                  <Upload size={48} className="text-gray-400 mb-4" />
+                  <p className="text-lg font-medium text-gray-700">คลิกเพื่อเลือกไฟล์ Excel</p>
+                  <p className="text-sm text-gray-500 mt-2">รองรับไฟล์ .xlsx หรือ .xls</p>
+                  <input id="excel-upload" type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFileChange} />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 bg-blue-50 p-3 rounded-lg border border-blue-100">
+                    <div className="flex-1 flex items-center gap-2">
+                      <span className="font-medium text-blue-800">{importFile.name}</span>
+                      <span className="text-xs bg-white px-2 py-0.5 rounded text-blue-600 border border-blue-200">
+                        {importPreview.length} แถว
+                      </span>
+                    </div>
+                    <button onClick={() => { setImportFile(null); setImportPreview([]); }} className="text-xs text-blue-600 hover:underline">
+                      เปลี่ยนไฟล์
+                    </button>
+                  </div>
+
+                  {importPreviewMutation.isPending ? (
+                    <div className="py-12 text-center text-gray-500 animate-pulse">กำลังวิเคราะห์ไฟล์...</div>
+                  ) : importPreview.length > 0 ? (
+                    <div className="border rounded-xl overflow-hidden shadow-inner">
+                      <div className="overflow-x-auto max-h-[50vh]">
+                        <table className="w-full text-sm">
+                          <thead className="bg-gray-100 sticky top-0 z-10">
+                            <tr>
+                              <th className="p-3 text-left font-semibold text-gray-600 border-b w-12 text-center">แถว</th>
+                              <th className="p-3 text-left font-semibold text-gray-600 border-b">SKU</th>
+                              <th className="p-3 text-left font-semibold text-gray-600 border-b">บาร์โค้ด</th>
+                              <th className="p-3 text-left font-semibold text-gray-600 border-b">ชื่อสินค้า</th>
+                              <th className="p-3 text-left font-semibold text-gray-600 border-b">รายละเอียด</th>
+                              <th className="p-3 text-left font-semibold text-gray-600 border-b">ราคา</th>
+                              <th className="p-3 text-left font-semibold text-gray-600 border-b">หมวดหมู่</th>
+                              <th className="p-3 text-left font-semibold text-gray-600 border-b">สถานะ</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100 bg-white">
+                            {importPreview.map((row, idx) => {
+                              const updateRow = (field: string, val: any) => {
+                                const newRows = [...importPreview];
+                                newRows[idx] = { ...newRows[idx], [field]: val };
+                                // Re-validate
+                                const errs = [];
+                                if (!newRows[idx].sku) errs.push('ระบุ SKU');
+                                if (!newRows[idx].barcode) errs.push('ระบุ Barcode');
+                                if (!newRows[idx].name) errs.push('ระบุชื่อสินค้า');
+                                const priceNum = parseFloat(newRows[idx].defaultPrice);
+                                if (isNaN(priceNum) || priceNum < 0) errs.push('ราคาไม่ถูกต้อง');
+                                newRows[idx].errors = errs;
+                                if (errs.length > 0) newRows[idx].status = 'invalid';
+                                else if (newRows[idx].status === 'invalid') newRows[idx].status = 'new';
+                                setImportPreview(newRows);
+                              };
+
+                              return (
+                                <tr key={idx} className={row.status === 'invalid' ? 'bg-red-50/50' : 'hover:bg-gray-50'}>
+                                  <td className="p-2 text-center text-gray-400 text-xs border-r">{row.rowNum}</td>
+                                  <td className="p-1">
+                                    <input value={row.sku} onChange={(e) => updateRow('sku', e.target.value)}
+                                      className="w-full bg-transparent px-2 py-1.5 rounded focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none" placeholder="SKU..." />
+                                  </td>
+                                  <td className="p-1">
+                                    <input value={row.barcode} onChange={(e) => updateRow('barcode', e.target.value)}
+                                      className="w-full bg-transparent px-2 py-1.5 rounded focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none" placeholder="บาร์โค้ด..." />
+                                  </td>
+                                  <td className="p-1">
+                                    <input value={row.name} onChange={(e) => updateRow('name', e.target.value)}
+                                      className="w-full bg-transparent px-2 py-1.5 rounded focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none" placeholder="ชื่อสินค้า..." />
+                                  </td>
+                                  <td className="p-1">
+                                    <input value={row.description} onChange={(e) => updateRow('description', e.target.value)}
+                                      className="w-full text-xs text-gray-600 bg-transparent px-2 py-1.5 rounded focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none" placeholder="รายละเอียด..." />
+                                  </td>
+                                  <td className="p-1">
+                                    <input value={row.defaultPrice} onChange={(e) => updateRow('defaultPrice', e.target.value)}
+                                      className={`w-24 bg-transparent px-2 py-1.5 rounded focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none text-right ${isNaN(parseFloat(row.defaultPrice)) ? 'text-red-500 font-medium' : ''}`} placeholder="0.00" />
+                                  </td>
+                                  <td className="p-1">
+                                    <input value={row.category} onChange={(e) => updateRow('category', e.target.value)}
+                                      className="w-full bg-transparent px-2 py-1.5 rounded focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none text-xs" placeholder="หมวดหมู่..." />
+                                  </td>
+                                  <td className="p-2 text-xs">
+                                    {row.status === 'new' && <span className="bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium whitespace-nowrap">🌟 สินค้าใหม่</span>}
+                                    {row.status === 'update' && <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded-full font-medium whitespace-nowrap">✏️ อัพเดท</span>}
+                                    {row.status === 'invalid' && (
+                                      <div className="text-red-600 font-medium tooltip group relative cursor-help">
+                                        ❌ ข้อมูลไม่สมบูรณ์
+                                        <div className="absolute hidden group-hover:block z-50 bg-red-800 text-white p-2 rounded shadow-lg bottom-full mb-1 w-48 text-left">
+                                          {row.errors.map((e: string, i: number) => <div key={i}>• {e}</div>)}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )}
             </div>
-            <textarea
-              value={importText}
-              onChange={(e) => setImportText(e.target.value)}
-              className="input h-48 font-mono text-xs resize-none"
-              placeholder={'sku,barcode,name,description,defaultPrice,category\nITEM001,8850001234567,ตัวอย่างสินค้า,รายละเอียด,99.00,เครื่องดื่ม'}
-            />
-            <div className="flex gap-2">
-              <button onClick={handleImport} disabled={importMutation.isPending || !importText.trim()} className="btn-primary flex-1">
-                {importMutation.isPending ? 'กำลังนำเข้า...' : 'นำเข้า'}
+            
+            <div className="p-4 border-t flex justify-end gap-3 shrink-0 bg-gray-50 rounded-b-2xl">
+              <button onClick={() => setShowImport(false)} className="btn-secondary">ยกเลิก</button>
+              <button 
+                onClick={handleImportSubmit} 
+                disabled={!importFile || importPreview.length === 0 || importMutation.isPending || importPreview.some(r => r.status === 'invalid')} 
+                className="btn-primary flex items-center gap-2"
+              >
+                {importMutation.isPending ? 'กำลังประมวลผล...' : `ยืนยันการนำเข้า ${importPreview.filter(r => r.status !== 'invalid').length} รายการ`}
               </button>
-              <button onClick={() => setShowImport(false)} className="btn-secondary flex-1">ยกเลิก</button>
             </div>
           </div>
-        </Modal>
+        </div>
       )}
     </div>
   );

@@ -4,8 +4,25 @@ import fs from 'fs';
 import prisma from '../lib/prisma';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
 import { upload } from '../middleware/upload';
+import { parseItemExcel } from '../lib/itemParser';
+import multer from 'multer';
 
 const router = Router();
+const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+
+// POST import/preview
+router.post('/import/preview', authenticate, requireAdmin, importUpload.single('file'), async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'กรุณาอัพโหลดไฟล์ Excel' });
+    const existing = await prisma.item.findMany({ select: { barcode: true } });
+    const barcodes = new Set(existing.map((b) => b.barcode));
+    const rows = await parseItemExcel(req.file.buffer, barcodes);
+    res.json(rows);
+  } catch (err: any) {
+    console.error(err);
+    res.status(400).json({ error: err.message || 'วิเคราะห์ไฟล์ไม่สำเร็จ' });
+  }
+});
 
 // Get all items (with optional pagination)
 router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
@@ -79,7 +96,7 @@ router.post('/', authenticate, requireAdmin, upload.single('image'), async (req:
     });
     res.status(201).json(item);
   } catch (err: any) {
-    if (err.code === 'P2002') return res.status(400).json({ error: 'บาร์โค้ดซ้ำ กรุณาใช้บาร์โค้ดอื่น' });
+    if (err.code === 'P2002') return res.status(400).json({ error: 'SKU หรือบาร์โค้ดซ้ำ' });
     res.status(500).json({ error: 'Server error' });
   }
 });
