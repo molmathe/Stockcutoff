@@ -13,8 +13,8 @@ const BRANCH_MATCH_OPTIONS = [
 ];
 
 const ITEM_MATCH_OPTIONS = [
-  { value: 'barcode', label: 'บาร์โค้ด (barcode)' },
-  { value: 'sku', label: 'รหัสสินค้า (SKU)' },
+  { value: 'barcode', label: 'บาร์โค้ด (barcode) — แนะนำ' },
+  { value: 'sku', label: 'รหัสสินค้า (SKU) — ⚠️ อาจซ้ำได้ ใช้ด้วยความระวัง' },
 ];
 
 const EMPTY = {
@@ -213,6 +213,11 @@ export default function ReportTemplates() {
                   <select {...F('itemMatchBy')} className="input">
                     {ITEM_MATCH_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
+                  {form.itemMatchBy === 'sku' && (
+                    <p className="mt-1 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                      ⚠️ SKU อาจมีซ้ำในระบบ หากพบ SKU ซ้ำระบบจะจับคู่สินค้าแรกที่พบ อาจนำเข้าผิดสินค้าได้ แนะนำให้ใช้บาร์โค้ดแทน
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
