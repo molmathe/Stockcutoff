@@ -24,7 +24,7 @@ export function parseExcelDate(value: any): Date | null {
   if (typeof value === 'string' && value.trim()) {
     let d = new Date(value.trim());
     if (!isNaN(d.getTime())) return d;
-    const m = value.trim().match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+    const m = value.trim().match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
     if (m) {
       const year = parseInt(m[3]) < 100 ? 2000 + parseInt(m[3]) : parseInt(m[3]);
       d = new Date(year, parseInt(m[2]) - 1, parseInt(m[1]));
@@ -76,7 +76,7 @@ export async function parseExcelData(buffer: Buffer, platform: ImportPlatform): 
   if (platform === 'PLAYHOUSE') {
     dateCol = findColIdx(headers, ['date', 'วันที่']);
     branchCol = findColIdx(headers, ['branch', 'สาขา']);
-    itemCol = findColIdx(headers, ['barcode']);
+    itemCol = findColIdx(headers, ['sku', 'barcode']);
     qtyCol = findColIdx(headers, ['sales quantity', 'quantity', 'จำนวน']);
     totalCol = findColIdx(headers, ['net sales', 'total', 'ยอดสุทธิ']);
   } else if (platform === 'MBK') {
@@ -105,7 +105,10 @@ export async function parseExcelData(buffer: Buffer, platform: ImportPlatform): 
 
     const rawDateVal = getCellVal(dateCol);
     const rawBranch = cellStr(getCellVal(branchCol));
-    const rawItem = cellStr(getCellVal(itemCol));
+    let rawItem = cellStr(getCellVal(itemCol));
+    if (platform === 'PLAYHOUSE') {
+      rawItem = rawItem.replace(/^FONRY/i, '');
+    }
     const rawQtyVal = getCellVal(qtyCol);
     const rawTotalVal = getCellVal(totalCol);
 
