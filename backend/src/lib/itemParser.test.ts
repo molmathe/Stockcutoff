@@ -12,9 +12,9 @@ describe('Item Parser', () => {
     ws.addRow(['', '885003', 'Shoes', '', '1000', '']); // Invalid missing sku
 
     const buffer = await wb.xlsx.writeBuffer();
-    const existingSkus = new Set(['ITEM001']);
+    const existingBarcodes = new Set(['885001']);
     
-    const rows = await parseItemExcel(buffer as unknown as Buffer, existingSkus);
+    const rows = await parseItemExcel(buffer as unknown as Buffer, existingBarcodes);
 
     expect(rows.length).toBe(3);
     

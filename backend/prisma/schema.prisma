@@ -65,7 +65,7 @@ model Branch {
 
 model Item {
   id           String     @id @default(cuid())
-  sku          String     @unique
+  sku          String
   barcode      String     @unique
   name         String
   description  String?

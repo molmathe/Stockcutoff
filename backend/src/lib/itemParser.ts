@@ -17,7 +17,7 @@ function findColIdx(headers: string[], possibleNames: string[]): number {
   return headers.findIndex((h) => possibleNames.some((p) => h && h.toLowerCase().includes(p.toLowerCase())));
 }
 
-export async function parseItemExcel(buffer: Buffer, existingSkus: Set<string>): Promise<ParsedItemRow[]> {
+export async function parseItemExcel(buffer: Buffer, existingBarcodes: Set<string>): Promise<ParsedItemRow[]> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer as any);
   const ws = wb.worksheets[0];
@@ -68,7 +68,7 @@ export async function parseItemExcel(buffer: Buffer, existingSkus: Set<string>):
 
     let status: 'new' | 'update' | 'invalid' = 'invalid';
     if (errors.length === 0) {
-      status = existingSkus.has(sku) ? 'update' : 'new';
+      status = existingBarcodes.has(barcode) ? 'update' : 'new';
     }
 
     rows.push({

@@ -14,9 +14,9 @@ const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSiz
 router.post('/import/preview', authenticate, requireAdmin, importUpload.single('file'), async (req: AuthRequest, res: Response) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'กรุณาอัพโหลดไฟล์ Excel' });
-    const existing = await prisma.item.findMany({ select: { sku: true } });
-    const skus = new Set(existing.map((b) => b.sku));
-    const rows = await parseItemExcel(req.file.buffer, skus);
+    const existing = await prisma.item.findMany({ select: { barcode: true } });
+    const barcodes = new Set(existing.map((b) => b.barcode));
+    const rows = await parseItemExcel(req.file.buffer, barcodes);
     res.json(rows);
   } catch (err: any) {
     console.error(err);
@@ -96,7 +96,7 @@ router.post('/', authenticate, requireAdmin, upload.single('image'), async (req:
     });
     res.status(201).json(item);
   } catch (err: any) {
-    if (err.code === 'P2002') return res.status(400).json({ error: 'SKU หรือบาร์โค้ดซ้ำ' });
+    if (err.code === 'P2002') return res.status(400).json({ error: 'บาร์โค้ดซ้ำ' });
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -135,15 +135,15 @@ router.post('/bulk-import', authenticate, requireAdmin, async (req: AuthRequest,
         continue;
       }
       try {
-        const existing = await prisma.item.findUnique({ where: { sku: it.sku } });
+        const existing = await prisma.item.findUnique({ where: { barcode: it.barcode } });
         await prisma.item.upsert({
-          where: { sku: it.sku },
-          update: { barcode: it.barcode, name: it.name, description: it.description || null, defaultPrice: price, category: it.category || null },
+          where: { barcode: it.barcode },
+          update: { sku: it.sku, name: it.name, description: it.description || null, defaultPrice: price, category: it.category || null },
           create: { sku: it.sku, barcode: it.barcode, name: it.name, description: it.description || null, defaultPrice: price, category: it.category || null },
         });
         if (existing) updated++; else created++;
       } catch (e: any) {
-        errors.push(`SKU ${it.sku}: ${e.message}`);
+        errors.push(`Barcode ${it.barcode}: ${e.message}`);
       }
     }
     res.json({ message: `นำเข้าเรียบร้อย: สร้าง ${created}, อัพเดท ${updated}`, created, updated, errors });
@@ -218,7 +218,7 @@ router.put('/:id', authenticate, requireAdmin, upload.single('image'), async (re
     });
     res.json(item);
   } catch (err: any) {
-    if (err.code === 'P2002') return res.status(400).json({ error: 'SKU หรือบาร์โค้ดซ้ำ' });
+    if (err.code === 'P2002') return res.status(400).json({ error: 'บาร์โค้ดซ้ำ' });
     res.status(500).json({ error: 'Server error' });
   }
 });
