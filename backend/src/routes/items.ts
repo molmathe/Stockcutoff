@@ -118,15 +118,15 @@ router.post('/bulk-import', authenticate, requireAdmin, async (req: AuthRequest,
         continue;
       }
       try {
-        const existing = await prisma.item.findUnique({ where: { sku: it.sku } });
+        const existing = await prisma.item.findUnique({ where: { barcode: it.barcode } });
         await prisma.item.upsert({
-          where: { sku: it.sku },
-          update: { barcode: it.barcode, name: it.name, description: it.description || null, defaultPrice: price, category: it.category || null },
+          where: { barcode: it.barcode },
+          update: { sku: it.sku, name: it.name, description: it.description || null, defaultPrice: price, category: it.category || null },
           create: { sku: it.sku, barcode: it.barcode, name: it.name, description: it.description || null, defaultPrice: price, category: it.category || null },
         });
         if (existing) updated++; else created++;
       } catch (e: any) {
-        errors.push(`SKU ${it.sku}: ${e.message}`);
+        errors.push(`Barcode ${it.barcode}: บาร์โค้ดซ้ำ ไม่สามารถนำเข้าได้`);
       }
     }
     res.json({ message: `นำเข้าเรียบร้อย: สร้าง ${created}, อัพเดท ${updated}`, created, updated, errors });
