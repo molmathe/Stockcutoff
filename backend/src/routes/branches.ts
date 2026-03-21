@@ -33,12 +33,13 @@ router.get('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Res
 // POST create
 router.post('/', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const { name, code, address, phone, pincode, type, reportBranchId, bigsellerBranchId } = req.body;
+    const { name, code, address, phone, pincode, type, reportBranchId, bigsellerBranchId, tags } = req.body;
     const data: any = { name, code, address, phone };
 
     if (type) data.type = type;
     if (reportBranchId !== undefined) data.reportBranchId = reportBranchId || null;
     if (bigsellerBranchId !== undefined) data.bigsellerBranchId = bigsellerBranchId || null;
+    if (Array.isArray(tags)) data.tags = tags.map((t: string) => t.trim()).filter(Boolean);
 
     if (pincode && String(pincode).trim()) {
       if (!/^\d{4}$/.test(String(pincode).trim())) {
@@ -60,12 +61,13 @@ router.post('/', authenticate, requireAdmin, async (req: AuthRequest, res: Respo
 // PUT update
 router.put('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const { name, code, address, phone, active, pincode, type, reportBranchId, bigsellerBranchId } = req.body;
+    const { name, code, address, phone, active, pincode, type, reportBranchId, bigsellerBranchId, tags } = req.body;
     const data: any = { name, code, address, phone, active };
 
     if (type !== undefined) data.type = type;
     if (reportBranchId !== undefined) data.reportBranchId = reportBranchId || null;
     if (bigsellerBranchId !== undefined) data.bigsellerBranchId = bigsellerBranchId || null;
+    if (Array.isArray(tags)) data.tags = tags.map((t: string) => t.trim()).filter(Boolean);
 
     if (pincode !== undefined) {
       if (pincode === '' || pincode === null) {
