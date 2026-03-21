@@ -90,7 +90,7 @@ export default function Reports() {
       const url = URL.createObjectURL(new Blob([res.data]));
       const a = document.createElement('a');
       a.href = url;
-      a.download = `bigseller-import-${filters.startDate}-${filters.endDate}.xlsx`;
+      a.download = `bigseller-import-${Date.now()}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
       toast.success('ดาวน์โหลดไฟล์ BigSeller เรียบร้อย');
