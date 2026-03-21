@@ -28,6 +28,9 @@ if (process.env.JWT_SECRET.length < 32) {
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Trust nginx reverse proxy (required for express-rate-limit behind nginx)
+app.set('trust proxy', 1);
+
 // ── Rate limiters ────────────────────────────────────────────────────────────
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
