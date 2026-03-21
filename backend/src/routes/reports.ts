@@ -432,8 +432,16 @@ router.get('/export-bigseller', authenticate, requireAdmin, async (req: AuthRequ
     wb.creator = 'StockCutoff';
     const ws = wb.addWorksheet('Sheet2');
 
-    // Set column widths to match 34 columns
-    for (let i = 1; i <= 34; i++) ws.getColumn(i).width = 20;
+    // Column widths matching template exactly (others default to 20)
+    const COL_WIDTHS: Record<number, number> = {
+      1: 32.0,  2: 44.5,  3: 32.0,  4: 31.63, 5: 46.75,
+      6: 31.63, 9: 44.25, 10: 43.75, 11: 47.88,
+      15: 34.25, 16: 31.63, 20: 28.13, 21: 33.75,
+      27: 67.63, 34: 40.0,
+    };
+    for (let i = 1; i <= 34; i++) {
+      ws.getColumn(i).width = COL_WIDTHS[i] ?? 20;
+    }
 
     // Write the 4 fixed header rows exactly as the BigSeller template
     ws.addRow(BIGSELLER_HEADER_ROW1);
@@ -441,8 +449,24 @@ router.get('/export-bigseller', authenticate, requireAdmin, async (req: AuthRequ
     ws.addRow(BIGSELLER_HEADER_ROW3);
     ws.addRow(BIGSELLER_HEADER_ROW4);
 
-    // Style header row 1 (bold)
-    ws.getRow(1).font = { bold: true };
+    // Header row formatting specs matching import_hand_order_template_th.xlsx
+    const HEADER_SPECS = [
+      { row: 1, fgColor: 'FFCCFFCC', fontSize: 11, bold: false, wrapText: true,  height: 27.75 },
+      { row: 2, fgColor: 'FFBFBFBF', fontSize: 11, bold: true,  wrapText: false, height: 27.75 },
+      { row: 3, fgColor: 'FFBFBFBF', fontSize: 10, bold: false, wrapText: true,  height: 51.75 },
+      { row: 4, fgColor: 'FFBFBFBF', fontSize: 10, bold: false, wrapText: true,  height: 84.75 },
+    ];
+
+    for (const spec of HEADER_SPECS) {
+      const r = ws.getRow(spec.row);
+      r.height = spec.height;
+      for (let col = 1; col <= 34; col++) {
+        const cell = r.getCell(col);
+        cell.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: spec.fgColor } };
+        cell.font   = { size: spec.fontSize, bold: spec.bold };
+        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: spec.wrapText };
+      }
+    }
 
     // Data rows — one row per bill item
     for (const b of bills) {
@@ -451,17 +475,21 @@ router.get('/export-bigseller', authenticate, requireAdmin, async (req: AuthRequ
       const branchLabel = b.branch.bigsellerBranchId || b.branch.name;
 
       for (const bi of b.items) {
-        const row = new Array(34).fill(null);
-        row[0]  = branchLabel;          // A: ร้านค้า
-        row[1]  = b.billNumber;          // B: หมายเลขคำสั่งซื้อ
-        row[2]  = dateStr;               // C: เวลาสั่งซื้อ
-        row[4]  = branchLabel;           // E: คลังสินค้าจัดส่ง
-        row[5]  = branchLabel;           // F: ชื่อผู้รับ
-        row[26] = bi.item.barcode;       // AA: SKU ร้านค้า
-        row[27] = 'THB';                 // AB: สกุลเงิน
-        row[28] = Number(bi.price);      // AC: หน่วยราคา
-        row[29] = bi.quantity;           // AD: จำนวน
-        ws.addRow(row);
+        const rowData = new Array(34).fill(null);
+        rowData[0]  = branchLabel;     // A: ร้านค้า
+        rowData[1]  = b.billNumber;    // B: หมายเลขคำสั่งซื้อ
+        rowData[2]  = dateStr;         // C: เวลาสั่งซื้อ
+        rowData[4]  = branchLabel;     // E: คลังสินค้าจัดส่ง
+        rowData[5]  = branchLabel;     // F: ชื่อผู้รับ
+        rowData[26] = bi.item.barcode; // AA: SKU ร้านค้า
+        rowData[27] = 'THB';           // AB: สกุลเงิน
+        rowData[28] = Number(bi.price);// AC: หน่วยราคา
+        rowData[29] = bi.quantity;     // AD: จำนวน
+        const excelRow = ws.addRow(rowData);
+        excelRow.height = 12.75;
+        for (let col = 1; col <= 34; col++) {
+          excelRow.getCell(col).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        }
       }
     }
 
