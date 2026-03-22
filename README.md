@@ -1,28 +1,38 @@
 # Fonney StockCutoff POS System
 
-Full-stack Point-of-Sale and inventory management web app.
+Full-stack Point-of-Sale and inventory management web app for multi-branch retail operations.
 
 ## Changelog
 
+### v0.7.0
+- **การคัดแยกยอดขายหน้าร้าน** *(SUPER_ADMIN)* — upload a Consolidated Report (Excel) from CENTRAL / MBK / PLAYHOUSE; subtracts booth POS sales from report total to isolate in-store (หน้าร้าน) sales; results split into ✅ Ready / ⚠️ Review / 🔴 Errors; submit creates IMPORT bills for net dept store portion; review rows pushed to Unresolved Sales
+  - Supports PERMANENT branch matching via `reportBranchId`; BOOTH branches sharing the same code are correctly deducted
+  - Draft save / resume / delete (same pattern as Import Sales)
+  - **Duplicate protection** — detects existing IMPORT bills for same platform + branch + date range before submitting; shows conflict list, requires explicit force-confirm
+- **Import Sales — duplicate protection** — 409 conflict detection; modal lists duplicate dates/branches; user can cancel or force-import
+- **Audit Log** *(SUPER_ADMIN)* — view all system activity (CREATE_BILL, EDIT_BILL, CANCEL_BILL, SUBMIT_DAY, DEPT_RECONCILE, LOGIN); click-to-expand shows before/after item diff for EDIT_BILL; filters: date range, action type, user; paginated (50/page); 1000-day retention with daily auto-cleanup
+- **Super Admin — Edit Submitted Bill** — SUPER_ADMIN can edit bills with status SUBMITTED; barcode/SKU lookup, edit qty/price/discount per line, add/remove items; full before/after snapshot saved to audit log
+- **Bill subtotal rounding** — applied `round2()` to all subtotal/total calculations to prevent floating-point drift
+- **Import Sales auth hardened** — endpoints upgraded from `requireAdmin` → `requireSuperAdmin`
+- **Branch column fix (CENTRAL)** — parser now correctly maps `Store Number` (= `reportBranchId`) for branch matching
+
 ### v0.5.0
-- **Bulk image upload** — raised per-request file limit from 100 → 5 000; nginx `client_max_body_size` 50 M → 500 M; `proxy_read_timeout` 60 s → 300 s
-- **Branches — PIN visible** — PIN code now shown directly in the branch table instead of a generic "ตั้งค่าแล้ว" badge
-- **Branches — edit prefill** — opening the edit modal for a branch with an existing PIN now pre-fills the PIN field
-- **Branches — search & filter** — free-text search (name / code / PIN), dropdown filters for type (ถาวร / ชั่วคราว), PIN presence, and active status; footer shows `X / Y สาขา` when filtered; "ล้างตัวกรอง" clears all at once
-- **Items — category & active filters** — category dropdown and active/inactive dropdown added alongside the existing search bar; all filters are server-side and compatible with pagination; export CSV respects current filters
+- **Bulk image upload** — raised file limits; nginx `client_max_body_size` 500 M
+- **Branches** — PIN visible in table, edit modal pre-fills PIN, search & filter by type/PIN/active
+- **Items** — category & active filters (server-side, compatible with pagination + CSV export)
 
 ### v0.4.0
-- **DB indexes** — added composite and single-column indexes on Bill, BillItem, and Item tables; applied via Prisma migration on startup
-- **Pagination** — Items API supports `?page` + `?limit`; Items page shows 50 items per page with prev/next controls and total count
-- **React Query** — all admin pages (Dashboard, Items, Categories, Users, Branches, Bills) now use `@tanstack/react-query` v5 for caching, deduplication, and automatic background refresh (30 s stale time)
-- **Shared caches** — branches and categories queries are deduped across pages; category rename invalidates items cache
-- **Export All CSV** — fetches the complete (non-paginated) dataset regardless of current page
+- **DB indexes** — composite and single-column indexes on Bill, BillItem, Item
+- **Pagination** — Items API 50/page with prev/next
+- **React Query v5** — all admin pages use caching, dedup, auto-refresh
+- **Export All CSV** — full non-paginated dataset
 
 ### v0.3.1
-- **Branding** — renamed to *Fonney StockCutoff*; version badge shown in sidebar
-- **Drag-drop image mapping** — fixed blank-page bug when files dropped outside zone; fixed result display showing `[object Object]`; fixed highlight flicker on child elements; added real-time upload progress bar (bytes transferred + server processing phase)
-- **Security hardening** — JWT secret validation at startup; rate limiting on login & API routes; privilege-escalation guard on user updates; atomic DB transactions for category rename/delete; Thai-timezone correct day boundaries; negative-total guard; input validation across all routes; row/result caps (DoS prevention)
-- **POS 401 redirect** — cashier sessions now redirect to `/pos-login` instead of `/login`
+- **Branding** — renamed to *Fonney StockCutoff*; version badge in sidebar
+- **Security hardening** — JWT validation at startup, rate limiting, privilege-escalation guard, atomic transactions, Thai-timezone day boundaries
+- **POS 401 redirect** — cashier sessions redirect to `/pos-login`
+
+---
 
 ## Features
 
@@ -33,32 +43,40 @@ Full-stack Point-of-Sale and inventory management web app.
 - Save bill, view bill history
 - **End of Day** — submit all open bills in one click
 
-### Admin Backend
+### Admin
 - **Dashboard** — today's revenue, top items, 7-day trend, branch comparison
 - **Items** — CRUD with drag-drop image upload; bulk CSV import; bulk delete; category tagging
 - **Categories** — CRUD for product categories
-- **Branches** — CRUD with type (ถาวร/ชั่วคราว), external IDs (reportBranchId, bigsellerBranchId), PIN management
-- **Users** — CRUD, role management (Super Admin / Branch Admin / Cashier)
-- **Reports** — filter by date range & branch; download Excel; **Export Master** (combined POS + import data)
-- **Report Templates** *(SUPER_ADMIN)* — configurable column-mapping for Excel import files
-- **Import Sales** *(SUPER_ADMIN)* — upload an Excel file, preview every row with match status, then submit matched rows as bills
+- **Branches** — CRUD with type (ถาวร/ชั่วคราว), `reportBranchId`, PIN management
+- **Users** — CRUD, role management
+- **Reports** — filter by date range & branch; download Excel; Export Master (POS + import combined)
+- **Import Sales** *(SUPER_ADMIN)* — upload Excel, preview with match status, submit as bills; duplicate protection; draft save/resume
+- **Unresolved Sales** *(SUPER_ADMIN)* — rows that failed import matching; manual resolution
+- **การคัดแยกยอดขายหน้าร้าน** *(SUPER_ADMIN)* — subtract booth POS from consolidated report to get net in-store sales; duplicate-safe; draft support
+- **Audit Log** *(SUPER_ADMIN)* — full activity history with before/after diff; 1000-day retention
+- **Edit Submitted Bill** *(SUPER_ADMIN)* — modify any submitted bill with full audit trail
+
+---
 
 ## Roles
 
-| Role | POS | Items | Branches | Users | Reports | Import |
-|------|-----|-------|----------|-------|---------|--------|
-| SUPER_ADMIN | ✅ | ✅ | ✅ | ✅ | ✅ (all branches) | ✅ |
-| BRANCH_ADMIN | ✅ | ✅ | ✅ | ✅ (cashiers only) | ✅ (own branch) | — |
-| CASHIER | ✅ | view | — | — | — | — |
+| Role | POS | Items | Branches | Users | Reports | Import | Reconcile | Audit Log |
+|------|-----|-------|----------|-------|---------|--------|-----------|-----------|
+| SUPER_ADMIN | ✅ | ✅ | ✅ | ✅ | ✅ all | ✅ | ✅ | ✅ |
+| BRANCH_ADMIN | ✅ | ✅ | ✅ | ✅ cashiers | ✅ own | — | — | — |
+| CASHIER | ✅ | view | — | — | — | — | — | — |
+
+---
 
 ## Tech Stack
 
-- **Frontend**: React 18 + TypeScript + Vite + Tailwind CSS + Recharts
+- **Frontend**: React 18 + TypeScript + Vite + Tailwind CSS + Recharts + React Query v5
 - **Backend**: Node.js + Express + TypeScript + Prisma ORM
 - **Database**: PostgreSQL 16
 - **Reverse Proxy**: Nginx
 - **Container**: Docker + Docker Compose
-- **CI/CD**: GitHub Actions → GHCR
+
+---
 
 ## Quick Start (Docker)
 
@@ -69,7 +87,7 @@ cd stockcutoff
 
 # 2. Configure
 cp .env.example .env
-# Edit .env — set DB_PASSWORD and JWT_SECRET
+# Edit .env — set DB_PASSWORD and JWT_SECRET (min 32 chars)
 
 # 3. Start
 docker compose up -d --build
@@ -84,11 +102,12 @@ Open `http://localhost` in your browser.
 | User | Password | Role |
 |------|----------|------|
 | admin | admin123 | Super Admin |
-| branch_admin | branch123 | Branch Admin (HQ) |
-| cashier1 | cashier123 | Cashier (HQ) |
-| cashier2 | cashier123 | Cashier (Branch 01) |
+| branch_admin | branch123 | Branch Admin |
+| cashier1 | cashier123 | Cashier |
 
 > ⚠️ Change all passwords immediately after first login.
+
+---
 
 ## Development
 
@@ -97,8 +116,8 @@ Open `http://localhost` in your browser.
 cd backend
 cp .env.example .env      # set DATABASE_URL
 npm install
-npx prisma migrate dev    # creates DB + runs migrations
-npm run db:seed           # seed sample data
+npx prisma migrate dev
+npm run db:seed
 npm run dev               # http://localhost:3001
 
 # Frontend (new terminal)
@@ -107,63 +126,75 @@ npm install
 npm run dev               # http://localhost:5173
 ```
 
-## Cloudflare Tunnel
+---
 
-```bash
-# Install cloudflared on your server
-# Then create a tunnel pointing to localhost:80
-cloudflared tunnel --url http://localhost:80
-```
+## Excel Sales Import
 
-Or use the Cloudflare Zero Trust dashboard to create a persistent tunnel.
-
-## Excel Sales Import (v0.3)
-
-Import sales data from an Excel file exported by an external system (e.g. Bigseller).
+Supports 3 platforms: **CENTRAL / Robinson**, **MBK / At First**, **Playhouse**
 
 ### Workflow
-1. **Create a Report Template** (`/admin/report-templates`) — map the Excel column headers to the expected fields (date, barcode/SKU, price, qty, branch name/ID).
-2. **Configure matching** — choose how to match branches (`name`, `code`, `reportBranchId`, `bigsellerBranchId`) and items (`barcode` or `sku`).
-3. **Import Sales** (`/admin/import-sales`) — select the template, upload the `.xlsx` file, click **แสดงตัวอย่าง**.
-4. A full-screen preview shows every row with colour-coded status: ✅ matched / ⚠️ no branch / 🟡 no item / 🔴 invalid.
-5. Click **นำเข้า N แถว** — matched rows are grouped by `(saleDate, branchId)` into Bills with `source=IMPORT`.
+1. Go to **นำเข้าข้อมูลการขาย**
+2. Select platform → upload `.xlsx`
+3. Preview: ✅ matched / ⚠️ no branch / 🟡 no item / 🔴 invalid
+4. Fix unmatched rows inline (type corrected branch code or barcode)
+5. Click **นำเข้า N บิล** — matched rows grouped by `(saleDate, branchId)` into IMPORT Bills
+6. If duplicates detected → conflict modal; choose cancel or force-import
 
-### Export Master
-The **ส่งออกข้อมูลหลัก** button on the Reports page exports a single Excel sheet combining both POS-created and imported bills. Columns include: branch name, Bigseller branch ID, SKU, barcode, item name, qty, price, subtotal, sale date, source, bill number.
+### Branch matching
+Matched by `reportBranchId`. For CENTRAL, `Store Number` column is used (not `Store Name`).
 
-## CSV Import Format (Items)
+---
 
-Items bulk import accepts CSV with header row:
+## การคัดแยกยอดขายหน้าร้าน
 
-```csv
-sku,barcode,name,description,defaultPrice,category
-ITEM001,8850001234567,My Product,Product description,99.00,Electronics
-```
+Used when a department store provides a **Consolidated Report** combining booth (บูธ) and in-store (หน้าร้าน) sales.
+
+### Workflow
+1. Go to **การคัดแยกยอดขายหน้าร้าน**
+2. Select platform → upload Consolidated Report `.xlsx`
+3. System fetches submitted POS booth bills for matching branches & dates
+4. Net in-store = Consolidated − Booth
+5. Preview buckets:
+   - ✅ **ยอดขายหน้าร้าน** — ready to import
+   - ⚠️ **ต้องตรวจสอบ** — negative result (booth > consolidated); sent to Unresolved Sales
+   - 🔴 **ข้อผิดพลาด** — unknown branch/item or orphaned booth scans
+6. Click **นำเข้า** → creates IMPORT Bills for net in-store portion
+
+---
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DB_PASSWORD` | `StrongPass2024!` | PostgreSQL password |
-| `JWT_SECRET` | *(change this!)* | JWT signing secret |
-| `FRONTEND_URL` | `http://localhost` | CORS allowed origin |
-| `PORT` | `80` | Nginx listen port |
+| Variable | Description |
+|----------|-------------|
+| `DB_PASSWORD` | PostgreSQL password |
+| `JWT_SECRET` | JWT signing secret (min 32 chars) |
+| `FRONTEND_URL` | CORS allowed origin (e.g. `https://pos.example.com`) |
+| `PORT` | Nginx listen port (default `80`) |
+
+---
 
 ## Project Structure
 
 ```
 stockcutoff/
-├── backend/          # Express API + Prisma
-│   ├── prisma/       # Schema & seed
+├── backend/
+│   ├── prisma/           # Schema, migrations, seed
 │   └── src/
-│       ├── middleware/
-│       └── routes/
-├── frontend/         # React SPA
+│       ├── lib/          # audit.ts, excelParsers.ts, prisma.ts
+│       ├── middleware/   # auth.ts
+│       └── routes/       # auth, bills, branches, categories,
+│                         # deptReconcile, items, reports,
+│                         # auditLogs, users
+├── frontend/
 │   └── src/
-│       ├── components/
-│       ├── context/
+│       ├── components/   # Layout, Modal
+│       ├── context/      # AuthContext
 │       └── pages/
-│           └── admin/
-├── nginx/            # Reverse proxy config
+│           ├── admin/    # Dashboard, Items, Branches, Users,
+│           │             # Reports, ImportSales, UnresolvedSales,
+│           │             # DeptReconcile, AuditLogs
+│           ├── Bills.tsx
+│           └── POS.tsx
+├── nginx/
 └── docker-compose.yml
 ```
