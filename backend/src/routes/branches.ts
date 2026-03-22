@@ -8,8 +8,8 @@ const router = Router();
 const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 const safeBranch = (b: any) => {
-  const { pincode, ...rest } = b;
-  return { ...rest, hasPincode: !!pincode };
+  const { accessToken, ...rest } = b;
+  return rest;
 };
 
 // POST import/preview

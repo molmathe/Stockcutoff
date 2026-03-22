@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Plus, Pencil, Trash2, Building2, KeyRound, Link2, Copy, Check, Tag, X, FileUp, FileSpreadsheet, Upload, } from 'lucide-react';
+import { Plus, Pencil, Trash2, Building2, KeyRound, Link2, Copy, Check, Tag, X, FileUp, FileSpreadsheet, Upload, Search, Filter } from 'lucide-react';
 import client from '../../api/client';
 import Modal from '../../components/Modal';
 import type { Branch, BranchType } from '../../types';
@@ -20,6 +20,10 @@ export default function Branches() {
   const [form, setForm] = useState(EMPTY);
   const [copied, setCopied] = useState(false);
   const [tagInput, setTagInput] = useState('');
+  const [search, setSearch] = useState('');
+  const [filterType, setFilterType] = useState<'ALL' | BranchType>('ALL');
+  const [filterPin, setFilterPin] = useState<'ALL' | 'HAS' | 'NONE'>('ALL');
+  const [filterActive, setFilterActive] = useState<'ALL' | 'ACTIVE' | 'INACTIVE'>('ALL');
 
   // Import State
   const [showImport, setShowImport] = useState(false);
@@ -42,6 +46,21 @@ export default function Branches() {
   const { data: branches = [], isLoading: loading } = useQuery<Branch[]>({
     queryKey: ['branches'],
     queryFn: () => client.get('/branches').then((r) => r.data),
+  });
+
+  const filteredBranches = branches.filter((b) => {
+    if (search) {
+      const q = search.toLowerCase();
+      const matchName = b.name.toLowerCase().includes(q) || b.code.toLowerCase().includes(q);
+      const matchPin = b.pincode?.includes(q);
+      if (!matchName && !matchPin) return false;
+    }
+    if (filterType !== 'ALL' && b.type !== filterType) return false;
+    if (filterPin === 'HAS' && !b.pincode) return false;
+    if (filterPin === 'NONE' && b.pincode) return false;
+    if (filterActive === 'ACTIVE' && !b.active) return false;
+    if (filterActive === 'INACTIVE' && b.active) return false;
+    return true;
   });
 
   const saveMutation = useMutation({
@@ -74,7 +93,7 @@ export default function Branches() {
     setEditing(b);
     setForm({
       name: b.name, code: b.code, address: b.address || '', phone: b.phone || '',
-      pincode: '', active: b.active, type: b.type || 'PERMANENT',
+      pincode: b.pincode || '', active: b.active, type: b.type || 'PERMANENT',
       reportBranchId: b.reportBranchId || '', bigsellerBranchId: b.bigsellerBranchId || '',
       tags: b.tags || [],
     });
@@ -122,7 +141,7 @@ export default function Branches() {
   const saving = saveMutation.isPending;
 
   const toggleSelect = (id: string) => setSelected((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
-  const toggleAll = () => setSelected(selected.length === branches.length ? [] : branches.map((b) => b.id));
+  const toggleAll = () => setSelected(selected.length === filteredBranches.length ? [] : filteredBranches.map((b) => b.id));
 
   // Import Logic
   const handleImportFileChange = (f: File | null) => {
@@ -222,13 +241,49 @@ export default function Branches() {
         </div>
       </div>
 
+      {/* Search & Filters */}
+      <div className="flex flex-wrap gap-2 items-center">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="input pl-8 py-1.5 text-sm"
+            placeholder="ค้นหาชื่อสาขา, รหัส, PIN..."
+          />
+        </div>
+        <div className="flex items-center gap-1.5 text-xs text-gray-500">
+          <Filter size={13} />
+        </div>
+        <select value={filterType} onChange={(e) => setFilterType(e.target.value as any)} className="input py-1.5 text-sm w-auto">
+          <option value="ALL">ทุกประเภท</option>
+          <option value="PERMANENT">ถาวร</option>
+          <option value="TEMPORARY">ชั่วคราว</option>
+        </select>
+        <select value={filterPin} onChange={(e) => setFilterPin(e.target.value as any)} className="input py-1.5 text-sm w-auto">
+          <option value="ALL">PIN ทั้งหมด</option>
+          <option value="HAS">มี PIN</option>
+          <option value="NONE">ไม่มี PIN</option>
+        </select>
+        <select value={filterActive} onChange={(e) => setFilterActive(e.target.value as any)} className="input py-1.5 text-sm w-auto">
+          <option value="ALL">ทุกสถานะ</option>
+          <option value="ACTIVE">เปิดใช้งาน</option>
+          <option value="INACTIVE">ปิดใช้งาน</option>
+        </select>
+        {(search || filterType !== 'ALL' || filterPin !== 'ALL' || filterActive !== 'ALL') && (
+          <button onClick={() => { setSearch(''); setFilterType('ALL'); setFilterPin('ALL'); setFilterActive('ALL'); }} className="text-xs text-gray-400 hover:text-red-500 flex items-center gap-1">
+            <X size={13} /> ล้างตัวกรอง
+          </button>
+        )}
+      </div>
+
       <div className="card p-0 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
                 <th className="table-header w-10">
-                  <input type="checkbox" checked={selected.length === branches.length && branches.length > 0} onChange={toggleAll} className="rounded" />
+                  <input type="checkbox" checked={filteredBranches.length > 0 && filteredBranches.every(b => selected.includes(b.id))} onChange={toggleAll} className="rounded" />
                 </th>
                 <th className="table-header">รหัสสาขา</th>
                 <th className="table-header">ชื่อสาขา</th>
@@ -244,9 +299,9 @@ export default function Branches() {
             <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr><td colSpan={10} className="p-8 text-center text-gray-400">กำลังโหลด...</td></tr>
-              ) : branches.length === 0 ? (
-                <tr><td colSpan={10} className="p-8 text-center text-gray-400">ยังไม่มีสาขา</td></tr>
-              ) : branches.map((b) => (
+              ) : filteredBranches.length === 0 ? (
+                <tr><td colSpan={10} className="p-8 text-center text-gray-400">{branches.length === 0 ? 'ยังไม่มีสาขา' : 'ไม่พบสาขาที่ตรงกับตัวกรอง'}</td></tr>
+              ) : filteredBranches.map((b) => (
                 <tr key={b.id} className="hover:bg-gray-50">
                   <td className="table-cell">
                     <input type="checkbox" checked={selected.includes(b.id)} onChange={() => toggleSelect(b.id)} className="rounded" />
@@ -277,9 +332,9 @@ export default function Branches() {
                   </td>
                   <td className="table-cell text-gray-500 text-sm">{b.phone || '—'}</td>
                   <td className="table-cell text-center">
-                    {b.hasPincode ? (
-                      <span className="inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
-                        <KeyRound size={11} /> ตั้งค่าแล้ว
+                    {b.pincode ? (
+                      <span className="inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-mono font-bold tracking-widest">
+                        <KeyRound size={11} /> {b.pincode}
                       </span>
                     ) : (
                       <span className="text-xs text-gray-400">—</span>
@@ -301,7 +356,9 @@ export default function Branches() {
             </tbody>
           </table>
         </div>
-        <div className="px-4 py-2 border-t text-xs text-gray-400">{branches.length} สาขา</div>
+        <div className="px-4 py-2 border-t text-xs text-gray-400">
+          {filteredBranches.length !== branches.length ? `${filteredBranches.length} / ${branches.length} สาขา` : `${branches.length} สาขา`}
+        </div>
       </div>
 
       {showModal && (
@@ -389,7 +446,7 @@ export default function Branches() {
                 value={form.pincode}
                 onChange={(e) => setForm((f) => ({ ...f, pincode: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
                 className="input text-sm"
-                placeholder={editing ? 'ใส่ PIN ใหม่ หรือเว้นว่างเพื่อล้าง' : 'เช่น 1234'}
+                placeholder="เช่น 1234 (เว้นว่างเพื่อล้าง PIN)"
               />
               <p className="text-xs text-gray-400 mt-1">ใช้สำหรับเข้าสู่ระบบ POS ด้วย PIN โดยไม่ต้องใช้รหัสผ่าน</p>
             </div>

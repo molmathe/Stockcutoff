@@ -52,6 +52,8 @@ export default function Items() {
   // Search: input vs committed param
   const [search, setSearch] = useState('');
   const [searchParam, setSearchParam] = useState('');
+  const [filterCategory, setFilterCategory] = useState('');
+  const [filterActive, setFilterActive] = useState('');
   const [page, setPage] = useState(1);
 
   const [selected, setSelected] = useState<string[]>([]);
@@ -92,10 +94,15 @@ export default function Items() {
 
   // Items query with pagination
   const { data: pageData, isLoading: loading } = useQuery({
-    queryKey: ['items', searchParam, page],
+    queryKey: ['items', searchParam, filterCategory, filterActive, page],
     queryFn: () =>
       client.get('/items', {
-        params: { page, limit: LIMIT, ...(searchParam ? { search: searchParam } : {}) },
+        params: {
+          page, limit: LIMIT,
+          ...(searchParam ? { search: searchParam } : {}),
+          ...(filterCategory ? { category: filterCategory } : {}),
+          ...(filterActive !== '' ? { active: filterActive } : {}),
+        },
       }).then((r) => r.data as { items: Item[]; total: number; page: number; limit: number; pages: number }),
     placeholderData: (prev) => prev,
   });
@@ -111,6 +118,9 @@ export default function Items() {
   });
 
   const handleSearch = () => { setPage(1); setSearchParam(search); };
+  const handleFilterCategory = (v: string) => { setPage(1); setFilterCategory(v); };
+  const handleFilterActive = (v: string) => { setPage(1); setFilterActive(v); };
+  const handleClearFilters = () => { setSearch(''); setSearchParam(''); setFilterCategory(''); setFilterActive(''); setPage(1); };
 
   // Mutations
   const saveMutation = useMutation({
@@ -211,7 +221,11 @@ export default function Items() {
   // Export all items (fetches without pagination for complete dataset)
   const handleExportAll = async () => {
     try {
-      const { data } = await client.get('/items', { params: searchParam ? { search: searchParam } : {} });
+      const { data } = await client.get('/items', { params: {
+        ...(searchParam ? { search: searchParam } : {}),
+        ...(filterCategory ? { category: filterCategory } : {}),
+        ...(filterActive !== '' ? { active: filterActive } : {}),
+      }});
       exportCsv(data, `สินค้า-ทั้งหมด-${new Date().toISOString().slice(0, 10)}.csv`);
     } catch { toast.error('ส่งออกไม่สำเร็จ'); }
   };
@@ -324,16 +338,30 @@ export default function Items() {
         </div>
       </div>
 
-      {/* Search */}
+      {/* Search & Filters */}
       <div className="card py-3">
-        <div className="flex gap-2">
-          <div className="relative flex-1">
+        <div className="flex flex-wrap gap-2 items-center">
+          <div className="relative flex-1 min-w-[200px]">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
               placeholder="ค้นหาชื่อสินค้า, SKU หรือบาร์โค้ด…" className="input pl-9" />
           </div>
-          <button onClick={handleSearch} className="btn-primary">ค้นหา</button>
+          <button onClick={handleSearch} className="btn-primary px-4">ค้นหา</button>
+          <select value={filterCategory} onChange={(e) => handleFilterCategory(e.target.value)} className="input py-2 text-sm w-auto">
+            <option value="">ทุกหมวดหมู่</option>
+            {categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+          </select>
+          <select value={filterActive} onChange={(e) => handleFilterActive(e.target.value)} className="input py-2 text-sm w-auto">
+            <option value="">ทุกสถานะ</option>
+            <option value="true">เปิดใช้งาน</option>
+            <option value="false">ปิดใช้งาน</option>
+          </select>
+          {(searchParam || filterCategory || filterActive !== '') && (
+            <button onClick={handleClearFilters} className="text-xs text-gray-400 hover:text-red-500 flex items-center gap-1">
+              <X size={13} /> ล้างตัวกรอง
+            </button>
+          )}
         </div>
       </div>
 

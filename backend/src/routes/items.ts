@@ -153,7 +153,7 @@ router.post('/bulk-import', authenticate, requireAdmin, async (req: AuthRequest,
 });
 
 // Bulk image upload matched by barcode filename — must be before /:id
-router.post('/bulk-images', authenticate, requireAdmin, upload.array('images', 100), async (req: AuthRequest, res: Response) => {
+router.post('/bulk-images', authenticate, requireAdmin, upload.array('images', 5000), async (req: AuthRequest, res: Response) => {
   try {
     const files = req.files as Express.Multer.File[];
     if (!files || files.length === 0) return res.status(400).json({ error: 'ไม่มีไฟล์รูปภาพ' });
