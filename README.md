@@ -4,6 +4,13 @@ Full-stack Point-of-Sale and inventory management web app.
 
 ## Changelog
 
+### v0.5.0
+- **Bulk image upload** — raised per-request file limit from 100 → 5 000; nginx `client_max_body_size` 50 M → 500 M; `proxy_read_timeout` 60 s → 300 s
+- **Branches — PIN visible** — PIN code now shown directly in the branch table instead of a generic "ตั้งค่าแล้ว" badge
+- **Branches — edit prefill** — opening the edit modal for a branch with an existing PIN now pre-fills the PIN field
+- **Branches — search & filter** — free-text search (name / code / PIN), dropdown filters for type (ถาวร / ชั่วคราว), PIN presence, and active status; footer shows `X / Y สาขา` when filtered; "ล้างตัวกรอง" clears all at once
+- **Items — category & active filters** — category dropdown and active/inactive dropdown added alongside the existing search bar; all filters are server-side and compatible with pagination; export CSV respects current filters
+
 ### v0.4.0
 - **DB indexes** — added composite and single-column indexes on Bill, BillItem, and Item tables; applied via Prisma migration on startup
 - **Pagination** — Items API supports `?page` + `?limit`; Items page shows 50 items per page with prev/next controls and total count
