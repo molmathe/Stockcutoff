@@ -8,7 +8,7 @@ import type { Branch, BranchType } from '../../types';
 
 const EMPTY = {
   name: '', code: '', address: '', phone: '', pincode: '', active: true,
-  type: 'PERMANENT' as BranchType, reportBranchId: '', bigsellerBranchId: '',
+  type: 'PERMANENT' as BranchType, reportBranchId: '',
   tags: [] as string[],
 };
 
@@ -94,7 +94,7 @@ export default function Branches() {
     setForm({
       name: b.name, code: b.code, address: b.address || '', phone: b.phone || '',
       pincode: b.pincode || '', active: b.active, type: b.type || 'PERMANENT',
-      reportBranchId: b.reportBranchId || '', bigsellerBranchId: b.bigsellerBranchId || '',
+      reportBranchId: b.reportBranchId || '',
       tags: b.tags || [],
     });
     setTagInput('');
@@ -120,7 +120,6 @@ export default function Branches() {
       name: form.name, code: form.code, address: form.address, phone: form.phone,
       active: form.active, type: form.type,
       reportBranchId: form.reportBranchId || null,
-      bigsellerBranchId: form.bigsellerBranchId || null,
       tags: form.tags,
     };
     if (form.pincode) payload.pincode = form.pincode;
@@ -289,7 +288,7 @@ export default function Branches() {
                 <th className="table-header">ชื่อสาขา</th>
                 <th className="table-header">Tags / ชื่ออื่น</th>
                 <th className="table-header">ประเภท</th>
-                <th className="table-header">รหัสรายงาน / Bigseller</th>
+                <th className="table-header">รหัสรายงาน</th>
                 <th className="table-header">เบอร์โทร</th>
                 <th className="table-header text-center">รหัส PIN</th>
                 <th className="table-header">สถานะ</th>
@@ -326,9 +325,7 @@ export default function Branches() {
                   </td>
                   <td className="table-cell">{typeBadge(b.type)}</td>
                   <td className="table-cell text-xs text-gray-500 space-y-0.5">
-                    {b.reportBranchId && <div><span className="text-gray-400">RPT:</span> {b.reportBranchId}</div>}
-                    {b.bigsellerBranchId && <div><span className="text-gray-400">BS:</span> {b.bigsellerBranchId}</div>}
-                    {!b.reportBranchId && !b.bigsellerBranchId && <span className="text-gray-300">—</span>}
+                    {b.reportBranchId ? <div><span className="text-gray-400">RPT:</span> {b.reportBranchId}</div> : <span className="text-gray-300">—</span>}
                   </td>
                   <td className="table-cell text-gray-500 text-sm">{b.phone || '—'}</td>
                   <td className="table-cell text-center">
@@ -383,15 +380,9 @@ export default function Branches() {
               </select>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="label">รหัสสาขา (รายงาน)</label>
-                <input value={form.reportBranchId} onChange={(e) => setForm((f) => ({ ...f, reportBranchId: e.target.value }))} className="input font-mono" placeholder="รหัสในไฟล์รายงาน" />
-              </div>
-              <div>
-                <label className="label">รหัสสาขา (Bigseller)</label>
-                <input value={form.bigsellerBranchId} onChange={(e) => setForm((f) => ({ ...f, bigsellerBranchId: e.target.value }))} className="input font-mono" placeholder="รหัสใน Bigseller" />
-              </div>
+            <div>
+              <label className="label">รหัสสาขา (รายงาน)</label>
+              <input value={form.reportBranchId} onChange={(e) => setForm((f) => ({ ...f, reportBranchId: e.target.value }))} className="input font-mono" placeholder="รหัสในไฟล์รายงาน" />
             </div>
 
             <div>

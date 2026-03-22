@@ -16,7 +16,6 @@ export interface Branch {
   active: boolean;
   type: BranchType;
   reportBranchId: string | null;
-  bigsellerBranchId: string | null;
   tags: string[];
   pincode?: string | null;
   createdAt: string;

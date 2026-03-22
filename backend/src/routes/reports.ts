@@ -120,7 +120,6 @@ async function remapImportRows(inputRows: any[], maxRows = 10000) {
           b.name.toLowerCase() === v ||
           b.code.toLowerCase() === v ||
           (b.reportBranchId && b.reportBranchId.toLowerCase() === v) ||
-          (b.bigsellerBranchId && b.bigsellerBranchId.toLowerCase() === v) ||
           (b.tags && b.tags.some(tag => tag.toLowerCase() === v))
       ) || null;
     }
@@ -306,7 +305,7 @@ router.get('/download', authenticate, requireAdmin, async (req: AuthRequest, res
     const bills = await prisma.bill.findMany({
       where,
       include: {
-        branch: { select: { name: true, bigsellerBranchId: true } },
+        branch: { select: { name: true } },
         user: { select: { name: true } },
         items: { include: { item: true } },
       },
@@ -342,7 +341,6 @@ router.get('/download', authenticate, requireAdmin, async (req: AuthRequest, res
     s2.columns = [
       { header: 'เลขที่บิล', key: 'bill', width: 22 },
       { header: 'สาขา', key: 'branch', width: 20 },
-      { header: 'Bigseller Branch ID', key: 'bigsellerBranchId', width: 22 },
       { header: 'วันที่ขาย', key: 'date', width: 18 },
       { header: 'SKU', key: 'sku', width: 14 },
       { header: 'บาร์โค้ด', key: 'barcode', width: 18 },
@@ -356,7 +354,6 @@ router.get('/download', authenticate, requireAdmin, async (req: AuthRequest, res
       const saleDate = b.saleDate || b.createdAt;
       s2.addRow({
         bill: b.billNumber, branch: b.branch.name,
-        bigsellerBranchId: b.branch.bigsellerBranchId || '',
         date: saleDate.toLocaleString('th-TH'),
         sku: bi.item.sku, barcode: bi.item.barcode, name: bi.item.name,
         qty: bi.quantity, price: Number(bi.price), discount: Number(bi.discount), subtotal: Number(bi.subtotal),
@@ -401,7 +398,7 @@ router.get('/export-master', authenticate, requireAdmin, async (req: AuthRequest
     const bills = await prisma.bill.findMany({
       where,
       include: {
-        branch: { select: { name: true, code: true, bigsellerBranchId: true, reportBranchId: true } },
+        branch: { select: { name: true, code: true, reportBranchId: true } },
         items: { include: { item: { select: { sku: true, barcode: true, name: true } } } },
       },
       orderBy: { createdAt: 'asc' },
@@ -413,7 +410,6 @@ router.get('/export-master', authenticate, requireAdmin, async (req: AuthRequest
 
     ws.columns = [
       { header: 'Branch Name', key: 'branchName', width: 24 },
-      { header: 'Branch ID (Bigseller)', key: 'bigsellerBranchId', width: 24 },
       { header: 'Branch ID (Report)', key: 'reportBranchId', width: 22 },
       { header: 'Item SKU', key: 'sku', width: 16 },
       { header: 'Barcode', key: 'barcode', width: 20 },
@@ -431,7 +427,6 @@ router.get('/export-master', authenticate, requireAdmin, async (req: AuthRequest
       b.items.forEach((bi) => {
         ws.addRow({
           branchName: b.branch.name,
-          bigsellerBranchId: b.branch.bigsellerBranchId || '',
           reportBranchId: b.branch.reportBranchId || '',
           sku: bi.item.sku,
           barcode: bi.item.barcode,
@@ -467,7 +462,7 @@ router.get('/export-bigseller', authenticate, requireAdmin, async (req: AuthRequ
     const bills = await prisma.bill.findMany({
       where,
       include: {
-        branch: { select: { name: true, bigsellerBranchId: true } },
+        branch: { select: { name: true } },
         items: { include: { item: { select: { barcode: true } } } },
       },
       orderBy: { createdAt: 'asc' },
@@ -482,7 +477,7 @@ router.get('/export-bigseller', authenticate, requireAdmin, async (req: AuthRequ
     for (const b of bills) {
       const saleDate = b.saleDate || b.createdAt;
       const dateStr = saleDate.toISOString().replace('T', ' ').slice(0, 16).replace(/-/g, '/');
-      const branchLabel = b.branch.bigsellerBranchId || b.branch.name;
+      const branchLabel = b.branch.name;
 
       for (const bi of b.items) {
         const rowData = new Array(34).fill(null);
