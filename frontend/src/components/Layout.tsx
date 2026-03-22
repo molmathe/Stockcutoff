@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import {
   ShoppingCart, FileText, LayoutDashboard, Package,
   Building2, Users, BarChart3, LogOut, Menu, X, Tag,
-  FileSpreadsheet, FileUp, FileWarning
+  FileSpreadsheet, FileUp, FileWarning, ClipboardList
 } from 'lucide-react';
 
 export default function Layout() {
@@ -27,11 +27,12 @@ export default function Layout() {
       ...(user?.role === 'SUPER_ADMIN' ? [
         { to: '/admin/import-sales', icon: <FileUp size={18} />, label: 'นำเข้าข้อมูลการขาย' },
         { to: '/admin/unresolved-sales', icon: <FileWarning size={18} />, label: 'ยอดขายตกหล่น' },
+        { to: '/admin/audit-logs', icon: <ClipboardList size={18} />, label: 'ประวัติการใช้งาน' },
       ] : []),
     ] : []),
   ];
 
-  const handleLogout = () => { logout(); navigate('/login'); };
+  const handleLogout = () => { logout(); navigate(user?.posMode ? '/pos-login' : '/login'); };
 
   const roleLabel = () => {
     if (user?.branch?.name) return user.branch.name;

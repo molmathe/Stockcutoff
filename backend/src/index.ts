@@ -11,6 +11,8 @@ import billRoutes from './routes/bills';
 import userRoutes from './routes/users';
 import reportRoutes from './routes/reports';
 import categoryRoutes from './routes/categories';
+import auditLogRoutes from './routes/auditLogs';
+import prisma from './lib/prisma';
 // Removed reportTemplateRoutes
 
 dotenv.config();
@@ -68,8 +70,19 @@ app.use('/api/bills', billRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/categories', categoryRoutes);
+app.use('/api/audit-logs', auditLogRoutes);
 // Removed /api/report-templates route
 
 app.get('/health', (_req, res) => res.json({ status: 'ok', time: new Date() }));
+
+// ── Audit log retention cleanup (keep 1000 days) ─────────────────────────────
+const cleanAuditLogs = async () => {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 1000);
+  const result = await prisma.auditLog.deleteMany({ where: { createdAt: { lt: cutoff } } });
+  if (result.count > 0) console.log(`[audit] Cleaned ${result.count} log(s) older than 1000 days`);
+};
+cleanAuditLogs().catch(console.error);
+setInterval(() => cleanAuditLogs().catch(console.error), 24 * 60 * 60 * 1000);
 
 app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));

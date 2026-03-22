@@ -46,6 +46,24 @@ model User {
   bills          Bill[]
   importDrafts   ImportDraft[]
   unresolvedSales UnresolvedSale[]
+  auditLogs      AuditLog[]
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String?
+  detail    Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@index([action])
 }
 
 model Branch {

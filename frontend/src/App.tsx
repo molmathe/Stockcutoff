@@ -17,6 +17,7 @@ const Categories = lazy(() => import('./pages/admin/Categories'));
 // Removed ReportTemplates
 const ImportSales = lazy(() => import('./pages/admin/ImportSales'));
 const UnresolvedSales = lazy(() => import('./pages/admin/UnresolvedSales').then(m => ({ default: m.UnresolvedSales })));
+const AuditLogs = lazy(() => import('./pages/admin/AuditLogs'));
 
 const Loader = () => (
   <div className="flex h-full items-center justify-center text-gray-400 text-sm">กำลังโหลด...</div>
@@ -55,6 +56,7 @@ function AppRoutes() {
 // Removed ReportTemplates Route
           <Route path="admin/import-sales" element={<Guard roles={['SUPER_ADMIN']}><ImportSales /></Guard>} />
           <Route path="admin/unresolved-sales" element={<Guard roles={['SUPER_ADMIN']}><UnresolvedSales /></Guard>} />
+          <Route path="admin/audit-logs" element={<Guard roles={['SUPER_ADMIN']}><AuditLogs /></Guard>} />
         </Route>
       </Routes>
     </Suspense>

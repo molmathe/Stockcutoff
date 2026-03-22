@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import prisma from '../lib/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { logAudit, getClientIp } from '../lib/audit';
 
 const router = Router();
 
@@ -151,18 +152,31 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
         items: { include: { item: true } },
       },
     });
+    logAudit({ userId: req.user!.id, action: 'CREATE_BILL', entity: 'Bill', entityId: bill.id, detail: { billNumber: bill.billNumber, subtotal, discount: totalDiscount, total, itemCount: billItems.length, branchId: targetBranch }, ip: getClientIp(req) });
     res.status(201).json(bill);
   } catch {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// PUT /bills/:id — edit an OPEN bill
+// PUT /bills/:id — edit an OPEN bill (or SUBMITTED if SUPER_ADMIN)
 router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const bill = await prisma.bill.findUnique({ where: { id: req.params.id } });
+    const bill = await prisma.bill.findUnique({
+      where: { id: req.params.id },
+      include: { items: { include: { item: { select: { id: true, name: true, sku: true, barcode: true } } } } },
+    });
     if (!bill) return res.status(404).json({ error: 'ไม่พบบิล' });
-    if (bill.status !== 'OPEN') return res.status(400).json({ error: 'แก้ไขได้เฉพาะบิลที่ยังเปิดอยู่เท่านั้น' });
+
+    const isSuperAdmin = req.user!.role === 'SUPER_ADMIN';
+
+    // SUPER_ADMIN can edit OPEN or SUBMITTED; others can only edit OPEN
+    if (!isSuperAdmin && bill.status !== 'OPEN') {
+      return res.status(400).json({ error: 'แก้ไขได้เฉพาะบิลที่ยังเปิดอยู่เท่านั้น' });
+    }
+    if (bill.status === 'CANCELLED') {
+      return res.status(400).json({ error: 'ไม่สามารถแก้ไขบิลที่ยกเลิกแล้ว' });
+    }
 
     // Ownership / scope checks
     if (req.user!.role === 'CASHIER' && bill.userId !== req.user!.id) {
@@ -209,6 +223,34 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
         },
       });
     });
+    const beforeSnapshot = {
+      status: bill.status,
+      subtotal: Number(bill.subtotal),
+      discount: Number(bill.discount),
+      total: Number(bill.total),
+      notes: bill.notes,
+      items: (bill as any).items.map((bi: any) => ({
+        name: bi.item?.name ?? '',
+        sku: bi.item?.sku ?? '',
+        barcode: bi.item?.barcode ?? '',
+        quantity: bi.quantity,
+        price: Number(bi.price),
+        discount: Number(bi.discount),
+        subtotal: Number(bi.subtotal),
+      })),
+    };
+    const afterSnapshot = {
+      status: bill.status,
+      subtotal,
+      discount: totalDiscount,
+      total,
+      notes,
+      items: await Promise.all(billItems.map(async (bi) => {
+        const item = await prisma.item.findUnique({ where: { id: bi.itemId }, select: { name: true, sku: true, barcode: true } });
+        return { name: item?.name ?? '', sku: item?.sku ?? '', barcode: item?.barcode ?? '', quantity: bi.quantity, price: Number(bi.price), discount: Number(bi.discount), subtotal: Number(bi.subtotal) };
+      })),
+    };
+    logAudit({ userId: req.user!.id, action: 'EDIT_BILL', entity: 'Bill', entityId: bill.id, detail: { billNumber: bill.billNumber, before: beforeSnapshot, after: afterSnapshot }, ip: getClientIp(req) });
     res.json(updated);
   } catch {
     res.status(500).json({ error: 'Server error' });
@@ -244,6 +286,7 @@ router.post('/submit-day', authenticate, async (req: AuthRequest, res: Response)
       where,
       data: { status: 'SUBMITTED', submittedAt: new Date() },
     });
+    logAudit({ userId: req.user!.id, action: 'SUBMIT_DAY', entity: 'Bill', detail: { count: result.count, branchId: where.branchId }, ip: getClientIp(req) });
     res.json({ message: `ส่งบิล ${result.count} รายการเรียบร้อย`, count: result.count });
   } catch {
     res.status(500).json({ error: 'Server error' });
@@ -266,6 +309,7 @@ router.put('/:id/cancel', authenticate, async (req: AuthRequest, res: Response) 
     }
 
     const updated = await prisma.bill.update({ where: { id: req.params.id }, data: { status: 'CANCELLED' } });
+    logAudit({ userId: req.user!.id, action: 'CANCEL_BILL', entity: 'Bill', entityId: bill.id, detail: { billNumber: bill.billNumber, total: Number(bill.total), status: bill.status }, ip: getClientIp(req) });
     res.json(updated);
   } catch {
     res.status(500).json({ error: 'Server error' });

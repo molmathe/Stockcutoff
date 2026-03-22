@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
-import { FileText, ChevronDown, ChevronUp, X } from 'lucide-react';
+import { FileText, ChevronDown, ChevronUp, X, Pencil, Plus, Trash2 } from 'lucide-react';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import type { Bill, Branch } from '../types';
@@ -22,10 +22,30 @@ const statusLabel: Record<string, string> = {
   CANCELLED: 'ยกเลิก',
 };
 
+interface EditItem {
+  itemId: string;
+  barcode: string;
+  sku: string;
+  name: string;
+  quantity: number;
+  price: number;
+  discount: number;
+}
+
+interface EditState {
+  billId: string;
+  billNumber: string;
+  notes: string;
+  discount: number;
+  items: EditItem[];
+}
+
 export default function Bills() {
   const qc = useQueryClient();
   const { user } = useAuth();
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [editState, setEditState] = useState<EditState | null>(null);
+  const [barcodeSearching, setBarcodeSearching] = useState<Record<number, boolean>>({});
 
   const today = format(new Date(), 'yyyy-MM-dd');
   const defaultFilters = { startDate: today, endDate: today, status: '', branchId: '' };
@@ -33,6 +53,7 @@ export default function Bills() {
   const [searchParams, setSearchParams] = useState(defaultFilters);
 
   const isAdmin = user?.role !== 'CASHIER';
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
 
   const { data: branches = [] } = useQuery<Branch[]>({
     queryKey: ['branches'],
@@ -58,10 +79,96 @@ export default function Bills() {
     onError: () => toast.error('ยกเลิกบิลไม่สำเร็จ'),
   });
 
+  const editMutation = useMutation({
+    mutationFn: (data: { id: string; items: any[]; notes: string; discount: number }) =>
+      client.put(`/bills/${data.id}`, { items: data.items, notes: data.notes, discount: data.discount }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['bills'] });
+      toast.success('บันทึกการแก้ไขเรียบร้อย');
+      setEditState(null);
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.error || 'แก้ไขบิลไม่สำเร็จ'),
+  });
+
   const cancelBill = (id: string) => {
     if (!confirm('ยืนยันการยกเลิกบิลนี้?')) return;
     cancelMutation.mutate(id);
   };
+
+  const openEditModal = (bill: Bill) => {
+    setEditState({
+      billId: bill.id,
+      billNumber: bill.billNumber,
+      notes: bill.notes || '',
+      discount: Number(bill.discount),
+      items: bill.items.map((bi) => ({
+        itemId: bi.item?.id ?? bi.itemId,
+        barcode: bi.item?.barcode ?? '',
+        sku: bi.item?.sku ?? '',
+        name: bi.item?.name ?? '',
+        quantity: bi.quantity,
+        price: Number(bi.price),
+        discount: Number(bi.discount),
+      })),
+    });
+  };
+
+  const lookupBarcode = async (idx: number, barcode: string) => {
+    if (!barcode.trim()) return;
+    setBarcodeSearching((s) => ({ ...s, [idx]: true }));
+    try {
+      const r = await client.get(`/items/barcode/${encodeURIComponent(barcode.trim())}`);
+      const item = r.data;
+      setEditState((prev) => {
+        if (!prev) return prev;
+        const items = [...prev.items];
+        items[idx] = { ...items[idx], itemId: item.id, barcode: item.barcode, sku: item.sku, name: item.name, price: Number(item.defaultPrice) };
+        return { ...prev, items };
+      });
+    } catch {
+      toast.error('ไม่พบสินค้า');
+    } finally {
+      setBarcodeSearching((s) => ({ ...s, [idx]: false }));
+    }
+  };
+
+  const updateItem = (idx: number, field: keyof EditItem, value: any) => {
+    setEditState((prev) => {
+      if (!prev) return prev;
+      const items = [...prev.items];
+      items[idx] = { ...items[idx], [field]: value };
+      return { ...prev, items };
+    });
+  };
+
+  const addItem = () => {
+    setEditState((prev) => {
+      if (!prev) return prev;
+      return { ...prev, items: [...prev.items, { itemId: '', barcode: '', sku: '', name: '', quantity: 1, price: 0, discount: 0 }] };
+    });
+  };
+
+  const removeItem = (idx: number) => {
+    setEditState((prev) => {
+      if (!prev) return prev;
+      return { ...prev, items: prev.items.filter((_, i) => i !== idx) };
+    });
+  };
+
+  const saveEdit = () => {
+    if (!editState) return;
+    const invalid = editState.items.some((it) => !it.itemId);
+    if (invalid) { toast.error('กรุณาค้นหาสินค้าให้ครบทุกรายการ'); return; }
+    editMutation.mutate({
+      id: editState.billId,
+      items: editState.items.map((it) => ({ itemId: it.itemId, quantity: it.quantity, price: it.price, discount: it.discount })),
+      notes: editState.notes,
+      discount: editState.discount,
+    });
+  };
+
+  const editSubtotal = editState?.items.reduce((s, it) => s + it.price * it.quantity - it.discount, 0) ?? 0;
+  const editTotal = Math.max(0, editSubtotal - (editState?.discount ?? 0));
 
   const totalRevenue = bills.filter((b) => b.status === 'SUBMITTED').reduce((s, b) => s + Number(b.total), 0);
 
@@ -157,6 +264,12 @@ export default function Bills() {
                       <X size={16} />
                     </button>
                   )}
+                  {isSuperAdmin && (bill.status === 'OPEN' || bill.status === 'SUBMITTED') && (
+                    <button onClick={(e) => { e.stopPropagation(); openEditModal(bill); }}
+                      className="text-blue-400 hover:text-blue-600 shrink-0" title="แก้ไขบิล">
+                      <Pencil size={15} />
+                    </button>
+                  )}
                   {expanded === bill.id ? <ChevronUp size={16} className="text-gray-400 shrink-0" /> : <ChevronDown size={16} className="text-gray-400 shrink-0" />}
                 </div>
 
@@ -222,6 +335,135 @@ export default function Bills() {
           </div>
         )}
       </div>
+
+      {/* Edit Bill Modal */}
+      {editState && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b shrink-0">
+              <div>
+                <h2 className="text-base font-bold text-gray-800">แก้ไขบิล</h2>
+                <p className="text-xs text-gray-400">{editState.billNumber}</p>
+              </div>
+              <button onClick={() => setEditState(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+              {/* Items */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-semibold text-gray-700">รายการสินค้า</p>
+                  <button onClick={addItem} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800">
+                    <Plus size={13} /> เพิ่มรายการ
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {editState.items.map((it, idx) => (
+                    <div key={idx} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                      <div className="grid grid-cols-12 gap-2 items-start">
+                        {/* Barcode */}
+                        <div className="col-span-12 sm:col-span-4">
+                          <label className="text-[10px] text-gray-400 mb-0.5 block">บาร์โค้ด / SKU</label>
+                          <div className="flex gap-1">
+                            <input
+                              type="text"
+                              value={it.barcode}
+                              onChange={(e) => updateItem(idx, 'barcode', e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') lookupBarcode(idx, it.barcode); }}
+                              placeholder="สแกนหรือพิมพ์บาร์โค้ด"
+                              className="input text-xs flex-1 min-w-0"
+                            />
+                            <button
+                              onClick={() => lookupBarcode(idx, it.barcode)}
+                              disabled={barcodeSearching[idx]}
+                              className="px-2 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 disabled:opacity-50 shrink-0"
+                            >
+                              {barcodeSearching[idx] ? '...' : 'ค้น'}
+                            </button>
+                          </div>
+                          {it.name && <p className="text-[10px] text-green-600 mt-0.5 truncate">{it.name} {it.sku ? `(${it.sku})` : ''}</p>}
+                          {!it.name && it.itemId === '' && <p className="text-[10px] text-red-400 mt-0.5">ยังไม่ได้เลือกสินค้า</p>}
+                        </div>
+                        {/* Qty */}
+                        <div className="col-span-4 sm:col-span-2">
+                          <label className="text-[10px] text-gray-400 mb-0.5 block">จำนวน</label>
+                          <input type="number" min={1} value={it.quantity}
+                            onChange={(e) => updateItem(idx, 'quantity', Math.max(1, parseInt(e.target.value) || 1))}
+                            className="input text-xs" />
+                        </div>
+                        {/* Price */}
+                        <div className="col-span-4 sm:col-span-3">
+                          <label className="text-[10px] text-gray-400 mb-0.5 block">ราคา (฿)</label>
+                          <input type="number" min={0} step="0.01" value={it.price}
+                            onChange={(e) => updateItem(idx, 'price', parseFloat(e.target.value) || 0)}
+                            className="input text-xs" />
+                        </div>
+                        {/* Discount */}
+                        <div className="col-span-3 sm:col-span-2">
+                          <label className="text-[10px] text-gray-400 mb-0.5 block">ส่วนลด (฿)</label>
+                          <input type="number" min={0} step="0.01" value={it.discount}
+                            onChange={(e) => updateItem(idx, 'discount', parseFloat(e.target.value) || 0)}
+                            className="input text-xs" />
+                        </div>
+                        {/* Remove */}
+                        <div className="col-span-1 flex items-end pb-1">
+                          <button onClick={() => removeItem(idx)} className="text-red-400 hover:text-red-600 p-1">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="text-right text-xs text-gray-500 mt-1">
+                        รวม: <span className="font-medium text-gray-800">฿{(it.price * it.quantity - it.discount).toFixed(2)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Bill discount & notes */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">ส่วนลดบิล (฿)</label>
+                  <input type="number" min={0} step="0.01" value={editState.discount}
+                    onChange={(e) => setEditState((s) => s ? { ...s, discount: parseFloat(e.target.value) || 0 } : s)}
+                    className="input" />
+                </div>
+                <div>
+                  <label className="label">หมายเหตุ</label>
+                  <input type="text" value={editState.notes}
+                    onChange={(e) => setEditState((s) => s ? { ...s, notes: e.target.value } : s)}
+                    className="input" />
+                </div>
+              </div>
+
+              {/* Total summary */}
+              <div className="bg-blue-50 rounded-lg p-3 text-sm">
+                <div className="flex justify-between text-gray-500">
+                  <span>ยอดรวมสินค้า</span><span>฿{editSubtotal.toFixed(2)}</span>
+                </div>
+                {editState.discount > 0 && (
+                  <div className="flex justify-between text-orange-600">
+                    <span>ส่วนลดบิล</span><span>-฿{editState.discount.toFixed(2)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between font-bold text-blue-700 text-base mt-1 pt-1 border-t border-blue-200">
+                  <span>ยอดสุทธิ</span><span>฿{editTotal.toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-end gap-2 px-5 py-4 border-t shrink-0">
+              <button onClick={() => setEditState(null)} className="btn-secondary">ยกเลิก</button>
+              <button onClick={saveEdit} disabled={editMutation.isPending} className="btn-primary">
+                {editMutation.isPending ? 'กำลังบันทึก...' : 'บันทึก'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
