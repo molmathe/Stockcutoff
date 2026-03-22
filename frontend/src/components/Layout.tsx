@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import {
   ShoppingCart, FileText, LayoutDashboard, Package,
   Building2, Users, BarChart3, LogOut, Menu, X, Tag,
-  FileSpreadsheet, FileUp, FileWarning, ClipboardList
+  FileSpreadsheet, FileUp, FileWarning, ClipboardList, GitMerge
 } from 'lucide-react';
 
 export default function Layout() {
@@ -27,6 +27,7 @@ export default function Layout() {
       ...(user?.role === 'SUPER_ADMIN' ? [
         { to: '/admin/import-sales', icon: <FileUp size={18} />, label: 'นำเข้าข้อมูลการขาย' },
         { to: '/admin/unresolved-sales', icon: <FileWarning size={18} />, label: 'ยอดขายตกหล่น' },
+        { to: '/admin/dept-reconcile', icon: <GitMerge size={18} />, label: 'การคัดแยกยอดขายหน้าร้าน' },
         { to: '/admin/audit-logs', icon: <ClipboardList size={18} />, label: 'ประวัติการใช้งาน' },
       ] : []),
     ] : []),

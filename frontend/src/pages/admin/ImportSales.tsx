@@ -35,6 +35,7 @@ export default function ImportSales() {
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
   const [submitting, setSubmitting] = useState(false);
   const [resumingDraftId, setResumingDraftId] = useState<string | null>(null);
+  const [dupConflict, setDupConflict] = useState<{ saleDate: string; branchName: string }[] | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   
   const queryClient = useQueryClient();
@@ -159,12 +160,10 @@ export default function ImportSales() {
     }
   };
 
-  const handleSubmit = async () => {
+  const doSubmit = async (force = false) => {
     if (!preview) return;
     const matchedRows = preview.rows.filter((r) => r.status === 'matched');
     const unmatchedRows = preview.rows.filter((r) => r.status !== 'matched');
-    if (matchedRows.length === 0) { toast.error('ไม่มีแถวที่จับคู่ได้'); return; }
-    if (!confirm(`นำเข้าข้อมูล ${matchedRows.length} แถว ยืนยัน?`)) return;
     setSubmitting(true);
     try {
       const { data } = await client.post('/reports/import/submit', {
@@ -173,15 +172,29 @@ export default function ImportSales() {
         unmatchedRows,
         fileName: (preview as any).fileName || file?.name,
         draftId: (preview as any).draftId,
+        force,
       });
       toast.success(data.message || `นำเข้าเรียบร้อย`);
       setPreview(null);
       setFile(null);
+      setDupConflict(null);
       if (fileRef.current) fileRef.current.value = '';
       queryClient.invalidateQueries({ queryKey: ['importDrafts'] });
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'นำเข้าไม่สำเร็จ');
+      if (err.response?.status === 409) {
+        setDupConflict(err.response.data.conflicts || []);
+      } else {
+        toast.error(err.response?.data?.error || 'นำเข้าไม่สำเร็จ');
+      }
     } finally { setSubmitting(false); }
+  };
+
+  const handleSubmit = async () => {
+    if (!preview) return;
+    const matchedRows = preview.rows.filter((r) => r.status === 'matched');
+    if (matchedRows.length === 0) { toast.error('ไม่มีแถวที่จับคู่ได้'); return; }
+    if (!confirm(`นำเข้าข้อมูล ${matchedRows.length} แถว ยืนยัน?`)) return;
+    await doSubmit(false);
   };
 
   const filteredRows = preview?.rows.filter((r) => {
@@ -276,6 +289,38 @@ export default function ImportSales() {
           </button>
         </div>
       </div>
+
+      {/* Duplicate conflict modal */}
+      {dupConflict && (
+        <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center gap-3 text-orange-600">
+              <AlertCircle size={24} />
+              <h3 className="text-lg font-bold">พบข้อมูลนำเข้าซ้ำ</h3>
+            </div>
+            <p className="text-sm text-gray-600">วันที่และสาขาต่อไปนี้มีข้อมูล IMPORT อยู่แล้วในระบบ:</p>
+            <div className="max-h-48 overflow-y-auto border rounded-lg divide-y text-sm">
+              {dupConflict.map((c, i) => (
+                <div key={i} className="px-3 py-2 flex justify-between">
+                  <span className="text-gray-700">{c.branchName}</span>
+                  <span className="text-gray-500 font-mono">{c.saleDate}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500">หากนำเข้าซ้ำ ยอดขายจะถูกบันทึกสองครั้ง</p>
+            <div className="flex gap-3 justify-end pt-1">
+              <button onClick={() => setDupConflict(null)} className="btn-secondary">ยกเลิก</button>
+              <button
+                onClick={() => doSubmit(true)}
+                disabled={submitting}
+                className="btn-primary bg-orange-600 hover:bg-orange-700 border-orange-600"
+              >
+                {submitting ? 'กำลังนำเข้า...' : 'นำเข้าซ้ำต่อไป'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Preview Panel */}
       {preview && (

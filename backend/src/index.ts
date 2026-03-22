@@ -12,6 +12,7 @@ import userRoutes from './routes/users';
 import reportRoutes from './routes/reports';
 import categoryRoutes from './routes/categories';
 import auditLogRoutes from './routes/auditLogs';
+import deptReconcileRoutes from './routes/deptReconcile';
 import prisma from './lib/prisma';
 // Removed reportTemplateRoutes
 
@@ -71,6 +72,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/audit-logs', auditLogRoutes);
+app.use('/api/dept-reconcile', deptReconcileRoutes);
 // Removed /api/report-templates route
 
 app.get('/health', (_req, res) => res.json({ status: 'ok', time: new Date() }));

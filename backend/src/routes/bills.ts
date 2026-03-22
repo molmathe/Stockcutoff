@@ -6,6 +6,8 @@ import { logAudit, getClientIp } from '../lib/audit';
 
 const router = Router();
 
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
 const generateBillNumber = () => {
   const d = new Date();
   const date = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
@@ -127,13 +129,13 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
       const qty = Number(it.quantity) || 0;
       const price = Number(it.price) || 0;
       const itemDiscount = Number(it.discount) || 0;
-      const sub = price * qty - itemDiscount;
-      subtotal += sub;
+      const sub = round2(price * qty - itemDiscount);
+      subtotal = round2(subtotal + sub);
       return { itemId: it.itemId, quantity: qty, price, discount: itemDiscount, subtotal: sub };
     });
 
-    const totalDiscount = Math.max(0, Number(discount));
-    const total = Math.max(0, subtotal - totalDiscount);
+    const totalDiscount = Math.max(0, round2(Number(discount)));
+    const total = Math.max(0, round2(subtotal - totalDiscount));
 
     const bill = await prisma.bill.create({
       data: {
@@ -197,12 +199,12 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
       const qty = Number(it.quantity) || 0;
       const price = Number(it.price) || 0;
       const itemDiscount = Number(it.discount) || 0;
-      const sub = price * qty - itemDiscount;
-      subtotal += sub;
+      const sub = round2(price * qty - itemDiscount);
+      subtotal = round2(subtotal + sub);
       return { itemId: it.itemId, quantity: qty, price, discount: itemDiscount, subtotal: sub };
     });
-    const totalDiscount = Math.max(0, Number(discount));
-    const total = Math.max(0, subtotal - totalDiscount);
+    const totalDiscount = Math.max(0, round2(Number(discount)));
+    const total = Math.max(0, round2(subtotal - totalDiscount));
 
     // Atomic: delete old items and recreate within one transaction to prevent data loss
     const updated = await prisma.$transaction(async (tx) => {

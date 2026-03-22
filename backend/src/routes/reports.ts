@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import prisma from '../lib/prisma';
-import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
+import { authenticate, requireAdmin, requireSuperAdmin, AuthRequest } from '../middleware/auth';
 import path from 'path';
 import { parseExcelData, ImportPlatform } from '../lib/excelParsers';
 
@@ -512,7 +512,7 @@ router.get('/export-bigseller', authenticate, requireAdmin, async (req: AuthRequ
 
 // ─── Import Drafts ────────────────────────────────────────────────────────────
 
-router.get('/import/drafts', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+router.get("/import/drafts", authenticate, requireSuperAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const drafts = await prisma.importDraft.findMany({
       where: { userId: req.user!.id },
@@ -527,7 +527,7 @@ router.get('/import/drafts', authenticate, requireAdmin, async (req: AuthRequest
   }
 });
 
-router.post('/import/draft', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+router.post('/import/draft', authenticate, requireSuperAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const { platform, fileName, rows } = req.body;
     let draftId = req.body.draftId;
@@ -549,7 +549,7 @@ router.post('/import/draft', authenticate, requireAdmin, async (req: AuthRequest
   }
 });
 
-router.post('/import/draft/:id/resume', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+router.post('/import/draft/:id/resume', authenticate, requireSuperAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const draft = await prisma.importDraft.findUnique({ where: { id: req.params.id } });
     if (!draft) return res.status(404).json({ error: 'Not found' });
@@ -568,7 +568,7 @@ router.post('/import/draft/:id/resume', authenticate, requireAdmin, async (req: 
   }
 });
 
-router.delete('/import/draft/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+router.delete('/import/draft/:id', authenticate, requireSuperAdmin, async (req: AuthRequest, res: Response) => {
   try {
     await prisma.importDraft.delete({ where: { id: req.params.id } });
     res.json({ success: true });
@@ -577,7 +577,7 @@ router.delete('/import/draft/:id', authenticate, requireAdmin, async (req: AuthR
   }
 });
 
-router.post('/import/match', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+router.post('/import/match', authenticate, requireSuperAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const result = await remapImportRows([req.body], 1);
     res.json(result.rows[0]);
@@ -723,7 +723,7 @@ router.post('/unresolved-sales/resolve', authenticate, requireAdmin, async (req:
 
 // ─── Import Preview ──────────────────────────────────────────────────────────
 
-router.post('/import/preview', authenticate, requireAdmin, importUpload.single('file'), async (req: AuthRequest, res: Response) => {
+router.post('/import/preview', authenticate, requireSuperAdmin, importUpload.single('file'), async (req: AuthRequest, res: Response) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'กรุณาอัพโหลดไฟล์ Excel' });
     const { platform } = req.body;
@@ -742,9 +742,9 @@ router.post('/import/preview', authenticate, requireAdmin, importUpload.single('
 
 // ─── Import Submit ────────────────────────────────────────────────────────────
 
-router.post('/import/submit', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+router.post('/import/submit', authenticate, requireSuperAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const { rows, platform, unmatchedRows, fileName, draftId } = req.body as {
+    const { rows, platform, unmatchedRows, fileName, draftId, force } = req.body as {
       rows: Array<{
         saleDate: string;
         branchId: string;
@@ -756,6 +756,7 @@ router.post('/import/submit', authenticate, requireAdmin, async (req: AuthReques
       unmatchedRows?: any[];
       fileName?: string;
       draftId?: string;
+      force?: boolean;
     };
 
     if (!Array.isArray(rows) || rows.length === 0) {
@@ -765,6 +766,38 @@ router.post('/import/submit', authenticate, requireAdmin, async (req: AuthReques
     }
     if (rows && rows.length > MAX_IMPORT_ROWS) {
       return res.status(400).json({ error: `ข้อมูลเกิน ${MAX_IMPORT_ROWS} แถว กรุณาแบ่งนำเข้าทีละส่วน` });
+    }
+
+    // ── Duplicate detection (unless force=true) ───────────────────────────────
+    if (!force && rows && rows.length > 0) {
+      const saleDates = [...new Set(rows.map(r => r.saleDate))]; // e.g. ["2026-01-15"]
+      const branchIds = [...new Set(rows.map(r => r.branchId).filter(Boolean))];
+      // Use day-range OR clauses to avoid exact-timestamp mismatch
+      const dateRanges = saleDates.map(d => ({
+        gte: new Date(`${d}T00:00:00+07:00`),
+        lte: new Date(`${d}T23:59:59.999+07:00`),
+      }));
+      const existingBills = await prisma.bill.findMany({
+        where: {
+          source: 'IMPORT',
+          importPlatform: platform || null,
+          branchId: { in: branchIds },
+          status: 'SUBMITTED',
+          OR: dateRanges.map(r => ({ saleDate: r })),
+        },
+        select: { saleDate: true, branchId: true, branch: { select: { name: true } } },
+      });
+      if (existingBills.length > 0) {
+        const conflicts = existingBills.map(b => ({
+          saleDate: b.saleDate ? new Date(b.saleDate.getTime() + 7 * 3600000).toISOString().split('T')[0] : '',
+          branchName: b.branch?.name || b.branchId,
+        }));
+        return res.status(409).json({
+          error: 'พบข้อมูลที่นำเข้าซ้ำ',
+          conflicts,
+          hint: 'ส่ง force=true เพื่อนำเข้าซ้ำ',
+        });
+      }
     }
 
     // Validate that all referenced branchIds and itemIds exist in DB
@@ -811,7 +844,7 @@ router.post('/import/submit', authenticate, requireAdmin, async (req: AuthReques
           discount: 0,
           total: subtotal,
           submittedAt: now,
-          notes: 'นำเข้าจากไฟล์ Excel',
+          notes: fileName ? `นำเข้าจากไฟล์: ${fileName}` : 'นำเข้าจากไฟล์ Excel',
           items: {
             create: group.items.map((r) => ({
               itemId: r.itemId,

@@ -30,6 +30,7 @@ const actionLabel: Record<string, string> = {
   EDIT_BILL: 'แก้ไขบิล',
   CANCEL_BILL: 'ยกเลิกบิล',
   SUBMIT_DAY: 'ปิดวัน',
+  DEPT_RECONCILE: 'Dept Reconcile',
   LOGIN: 'เข้าสู่ระบบ',
   POS_LOGIN: 'เข้าสู่ระบบ POS',
 };
@@ -39,6 +40,7 @@ const actionColor: Record<string, string> = {
   EDIT_BILL: 'bg-yellow-100 text-yellow-700',
   CANCEL_BILL: 'bg-red-100 text-red-700',
   SUBMIT_DAY: 'bg-green-100 text-green-700',
+  DEPT_RECONCILE: 'bg-indigo-100 text-indigo-700',
   LOGIN: 'bg-gray-100 text-gray-600',
   POS_LOGIN: 'bg-purple-100 text-purple-700',
 };
