@@ -20,4 +20,4 @@ COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY prisma ./prisma
 RUN mkdir -p uploads
 EXPOSE 3001
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]
+CMD ["sh", "-c", "until npx prisma migrate deploy; do echo 'DB not ready, retrying in 2s...'; sleep 2; done && node dist/index.js"]
