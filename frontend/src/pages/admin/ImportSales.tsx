@@ -4,6 +4,7 @@ import { Upload, FileSpreadsheet, CheckCircle2, XCircle, AlertCircle, X, FileUp,
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import client from '../../api/client';
 import type { ImportPreview, ImportPreviewRow } from '../../types';
+import { BranchAutoInput, ItemAutoInput } from '../../components/AutocompleteInputs';
 
 const PLATFORMS = [
   { id: 'CENTRAL', name: 'Central / Robinson' },
@@ -401,10 +402,10 @@ export default function ImportSales() {
                           <span className="text-orange-500">{row.rawBranch || '—'}</span>
                         )
                       ) : (
-                        <input type="text" className="w-full text-xs border rounded px-2 py-1 bg-white focus:ring-1 focus:ring-blue-400 outline-none transition-shadow" 
-                          defaultValue={row.rawBranch} 
-                          onBlur={(e) => handleRefreshRow(row.rowNum, 'rawBranch', e.target.value)} 
-                          placeholder="รหัส/ชื่อสาขา" 
+                        <BranchAutoInput
+                          key={row.rowNum + '-branch'}
+                          defaultValue={row.rawBranch}
+                          onCommit={(val) => handleRefreshRow(row.rowNum, 'rawBranch', val)}
                         />
                       )}
                     </td>
@@ -415,10 +416,10 @@ export default function ImportSales() {
                           <div className="text-gray-400 text-xs font-mono">{row.itemSku || row.itemBarcode}</div>
                         </div>
                       ) : (
-                        <input type="text" className="w-full text-xs font-mono border rounded px-2 py-1 bg-white focus:ring-1 focus:ring-blue-400 outline-none transition-shadow" 
-                          defaultValue={row.rawItem} 
-                          onBlur={(e) => handleRefreshRow(row.rowNum, 'rawItem', e.target.value)} 
-                          placeholder="รหัส/บาร์โค้ดสินค้า" 
+                        <ItemAutoInput
+                          key={row.rowNum + '-item'}
+                          defaultValue={row.rawItem}
+                          onCommit={(val) => handleRefreshRow(row.rowNum, 'rawItem', val)}
                         />
                       )}
                     </td>
