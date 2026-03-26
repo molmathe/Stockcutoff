@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import {
   ShoppingCart, FileText, LayoutDashboard, Package,
   Building2, Users, BarChart3, LogOut, Menu, X, Tag,
-  FileSpreadsheet, FileUp, FileWarning, ClipboardList, GitMerge
+  FileSpreadsheet, FileUp, FileWarning, ClipboardList, GitMerge, ShieldBan
 } from 'lucide-react';
 
 export default function Layout() {
@@ -20,15 +20,18 @@ export default function Layout() {
     { to: '/bills', icon: <FileText size={18} />, label: 'รายการบิล' },
     ...(isAdmin ? [
       { to: '/admin/items', icon: <Package size={18} />, label: 'จัดการสินค้า' },
+      ...(user?.role === 'SUPER_ADMIN' ? [
+        { to: '/admin/blocked-barcodes', icon: <ShieldBan size={16} />, label: 'บาร์โค้ดต้องห้าม', indent: true },
+      ] : []),
       { to: '/admin/categories', icon: <Tag size={18} />, label: 'จัดการหมวดหมู่' },
       { to: '/admin/branches', icon: <Building2 size={18} />, label: 'จัดการสาขา' },
       { to: '/admin/users', icon: <Users size={18} />, label: 'จัดการผู้ใช้' },
       { to: '/admin/reports', icon: <BarChart3 size={18} />, label: 'รายงานยอดขาย' },
       ...(user?.role === 'SUPER_ADMIN' ? [
-        { to: '/admin/import-sales', icon: <FileUp size={18} />, label: 'นำเข้าข้อมูลการขาย' },
+        { to: '/admin/import-sales',   icon: <FileUp size={18} />,      label: 'นำเข้าข้อมูลการขาย',         indent: false },
+        { to: '/admin/dept-reconcile', icon: <GitMerge size={16} />,    label: 'คัดแยกยอดขายหน้าร้าน',       indent: true  },
         { to: '/admin/unresolved-sales', icon: <FileWarning size={18} />, label: 'ยอดขายตกหล่น' },
-        { to: '/admin/dept-reconcile', icon: <GitMerge size={18} />, label: 'การคัดแยกยอดขายหน้าร้าน' },
-        { to: '/admin/audit-logs', icon: <ClipboardList size={18} />, label: 'ประวัติการใช้งาน' },
+        { to: '/admin/audit-logs',     icon: <ClipboardList size={18} />, label: 'ประวัติการใช้งาน' },
       ] : []),
     ] : []),
   ];
@@ -85,7 +88,9 @@ export default function Layout() {
               to={item.to}
               onClick={() => setOpen(false)}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all mb-0.5 ${
+                `flex items-center gap-3 rounded-lg text-sm transition-all mb-0.5 ${
+                  (item as any).indent ? 'ml-3 px-3 py-2 text-xs' : 'px-3 py-2.5'
+                } ${
                   isActive
                     ? 'bg-blue-50 text-blue-700 font-semibold border-l-[3px] border-blue-600 pl-[10px]'
                     : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'

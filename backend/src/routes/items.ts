@@ -8,7 +8,21 @@ import { parseItemExcel } from '../lib/itemParser';
 import multer from 'multer';
 
 const router = Router();
-const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const EXCEL_MIME = [
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+];
+const importUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (EXCEL_MIME.includes(file.mimetype) || file.originalname.match(/\.(xlsx|xls)$/i)) {
+      cb(null, true);
+    } else {
+      cb(new Error('อนุญาตเฉพาะไฟล์ Excel (.xlsx, .xls) เท่านั้น'));
+    }
+  },
+});
 
 // POST import/preview
 router.post('/import/preview', authenticate, requireAdmin, importUpload.single('file'), async (req: AuthRequest, res: Response) => {
@@ -61,7 +75,12 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
 // Get by barcode — must be before /:id pattern routes
 router.get('/barcode/:barcode', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const item = await prisma.item.findUnique({ where: { barcode: req.params.barcode } });
+    const code = req.params.barcode;
+    const blocked = await prisma.blockedBarcode.findUnique({ where: { barcode: code } });
+    if (blocked) {
+      return res.status(403).json({ error: 'บาร์โค้ดนี้ถูกระงับการใช้งาน กรุณาสแกนบาร์โค้ดสินค้าอีกครั้ง', blocked: true });
+    }
+    const item = await prisma.item.findUnique({ where: { barcode: code } });
     if (!item || !item.active) return res.status(404).json({ error: 'ไม่พบสินค้า' });
     res.json(item);
   } catch {
@@ -168,13 +187,13 @@ router.post('/bulk-images', authenticate, requireAdmin, upload.array('images', 5
       if (item) {
         if (item.imageUrl) {
           const oldPath = path.join(__dirname, '../../uploads', path.basename(item.imageUrl));
-          if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+          try { if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath); } catch { /* ignore stale file */ }
         }
         const imageUrl = `/uploads/${file.filename}`;
         await prisma.item.update({ where: { id: item.id }, data: { imageUrl } });
         matched.push({ barcode, name: item.name, imageUrl });
       } else {
-        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+        try { if (fs.existsSync(file.path)) fs.unlinkSync(file.path); } catch { /* ignore */ }
         unmatched.push(file.originalname);
       }
     }
@@ -195,7 +214,7 @@ router.put('/:id', authenticate, requireAdmin, upload.single('image'), async (re
     if (req.file) {
       if (existing.imageUrl) {
         const old = path.join(__dirname, '../../uploads', path.basename(existing.imageUrl));
-        if (fs.existsSync(old)) fs.unlinkSync(old);
+        try { if (fs.existsSync(old)) fs.unlinkSync(old); } catch { /* ignore stale file */ }
       }
       imageUrl = `/uploads/${req.file.filename}`;
     }
@@ -230,7 +249,7 @@ router.delete('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: 
     if (!item) return res.status(404).json({ error: 'ไม่พบสินค้า' });
     if (item.imageUrl) {
       const imgPath = path.join(__dirname, '../../uploads', path.basename(item.imageUrl));
-      if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
+      try { if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath); } catch { /* ignore stale file */ }
     }
     await prisma.item.delete({ where: { id: req.params.id } });
     res.json({ message: 'ลบเรียบร้อย' });

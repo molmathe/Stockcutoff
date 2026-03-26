@@ -15,10 +15,10 @@ const Users = lazy(() => import('./pages/admin/Users'));
 const Reports = lazy(() => import('./pages/admin/Reports'));
 const Categories = lazy(() => import('./pages/admin/Categories'));
 // Removed ReportTemplates
-const ImportSales = lazy(() => import('./pages/admin/ImportSales'));
+const SalesManager = lazy(() => import('./pages/admin/SalesManager'));
 const UnresolvedSales = lazy(() => import('./pages/admin/UnresolvedSales').then(m => ({ default: m.UnresolvedSales })));
 const AuditLogs = lazy(() => import('./pages/admin/AuditLogs'));
-const DeptReconcile = lazy(() => import('./pages/admin/DeptReconcile'));
+const BlockedBarcodes = lazy(() => import('./pages/admin/BlockedBarcodes'));
 
 const Loader = () => (
   <div className="flex h-full items-center justify-center text-gray-400 text-sm">กำลังโหลด...</div>
@@ -54,11 +54,12 @@ function AppRoutes() {
           <Route path="admin/users" element={<Guard roles={['SUPER_ADMIN', 'BRANCH_ADMIN']}><Users /></Guard>} />
           <Route path="admin/reports" element={<Guard roles={['SUPER_ADMIN', 'BRANCH_ADMIN']}><Reports /></Guard>} />
           <Route path="admin/categories" element={<Guard roles={['SUPER_ADMIN', 'BRANCH_ADMIN']}><Categories /></Guard>} />
-// Removed ReportTemplates Route
-          <Route path="admin/import-sales" element={<Guard roles={['SUPER_ADMIN']}><ImportSales /></Guard>} />
+{/* Removed ReportTemplates Route */}
+          <Route path="admin/import-sales" element={<Guard roles={['SUPER_ADMIN']}><SalesManager initialTab="import" /></Guard>} />
+          <Route path="admin/dept-reconcile" element={<Guard roles={['SUPER_ADMIN']}><SalesManager initialTab="reconcile" /></Guard>} />
           <Route path="admin/unresolved-sales" element={<Guard roles={['SUPER_ADMIN']}><UnresolvedSales /></Guard>} />
           <Route path="admin/audit-logs" element={<Guard roles={['SUPER_ADMIN']}><AuditLogs /></Guard>} />
-          <Route path="admin/dept-reconcile" element={<Guard roles={['SUPER_ADMIN']}><DeptReconcile /></Guard>} />
+          <Route path="admin/blocked-barcodes" element={<Guard roles={['SUPER_ADMIN']}><BlockedBarcodes /></Guard>} />
         </Route>
       </Routes>
     </Suspense>

@@ -86,7 +86,7 @@ router.get('/me', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.user!.id }, include: { branch: true } });
     if (!user) return res.status(404).json({ error: 'ไม่พบผู้ใช้' });
-    res.json({ id: user.id, username: user.username, name: user.name, role: user.role, branchId: user.branchId, branch: user.branch });
+    res.json({ id: user.id, username: user.username, name: user.name, role: user.role, branchId: user.branchId, branch: user.branch, ...(user.isSystem ? { posMode: true } : {}) });
   } catch {
     res.status(500).json({ error: 'Server error' });
   }

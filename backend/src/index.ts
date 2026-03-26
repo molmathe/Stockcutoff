@@ -13,6 +13,7 @@ import reportRoutes from './routes/reports';
 import categoryRoutes from './routes/categories';
 import auditLogRoutes from './routes/auditLogs';
 import deptReconcileRoutes from './routes/deptReconcile';
+import blockedBarcodesRoutes from './routes/blockedBarcodes';
 import prisma from './lib/prisma';
 // Removed reportTemplateRoutes
 
@@ -23,8 +24,12 @@ if (!process.env.JWT_SECRET) {
   console.error('FATAL: JWT_SECRET environment variable is not set. Refusing to start.');
   process.exit(1);
 }
-if (process.env.JWT_SECRET.length < 32) {
-  console.error('FATAL: JWT_SECRET is too short. Use at least 32 random characters.');
+if (process.env.JWT_SECRET.length < 64) {
+  console.error('FATAL: JWT_SECRET is too short. Use at least 64 random characters.');
+  process.exit(1);
+}
+if (!process.env.FRONTEND_URL) {
+  console.error('FATAL: FRONTEND_URL environment variable is not set. Refusing to start.');
   process.exit(1);
 }
 
@@ -37,7 +42,7 @@ app.set('trust proxy', 1);
 // ── Rate limiters ────────────────────────────────────────────────────────────
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: 5,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'พยายามเข้าสู่ระบบมากเกินไป กรุณารอ 15 นาทีแล้วลองใหม่' },
@@ -53,7 +58,7 @@ const apiLimiter = rateLimit({
 
 // ── Middleware ───────────────────────────────────────────────────────────────
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: process.env.FRONTEND_URL,
   credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));
@@ -61,7 +66,6 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // ── Routes ───────────────────────────────────────────────────────────────────
 app.use('/api/auth/login', loginLimiter);
-app.use('/api/auth/pos-login', loginLimiter);
 app.use('/api', apiLimiter);
 
 app.use('/api/auth', authRoutes);
@@ -73,6 +77,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/audit-logs', auditLogRoutes);
 app.use('/api/dept-reconcile', deptReconcileRoutes);
+app.use('/api/blocked-barcodes', blockedBarcodesRoutes);
 // Removed /api/report-templates route
 
 app.get('/health', (_req, res) => res.json({ status: 'ok', time: new Date() }));
@@ -87,4 +92,20 @@ const cleanAuditLogs = async () => {
 cleanAuditLogs().catch(console.error);
 setInterval(() => cleanAuditLogs().catch(console.error), 24 * 60 * 60 * 1000);
 
-app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
+// Request timeout middleware (30s)
+app.use((_req, res, next) => {
+  res.setTimeout(30000, () => res.status(503).json({ error: 'Request timeout' }));
+  next();
+});
+
+const server = app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
+
+// Graceful shutdown on SIGTERM (Docker stop)
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received — shutting down gracefully');
+  server.close(async () => {
+    await prisma.$disconnect();
+    console.log('Server closed');
+    process.exit(0);
+  });
+});

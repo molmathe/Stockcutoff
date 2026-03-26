@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import {
   Camera, Search, Plus, Minus, Trash2, ShoppingCart,
   CheckCircle, X, BarChart3, RefreshCw, Pencil, Lock,
+  AlertTriangle, ShieldAlert,
 } from 'lucide-react';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -47,7 +48,20 @@ export default function POS() {
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
   const [closingDay, setClosingDay] = useState(false);
+
+  // Suggestion state
+  const [suggestions, setSuggestions] = useState<Item[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [selectedSuggestion, setSelectedSuggestion] = useState(-1);
+  const suggestDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastKeyTimeRef = useRef<number>(0);
+
+  // Modal states
+  const [notFoundBarcode, setNotFoundBarcode] = useState<string | null>(null);
+  const [blockedBarcode, setBlockedBarcode] = useState<string | null>(null);
+
   const inputRef = useRef<HTMLInputElement>(null);
+  const suggestRef = useRef<HTMLDivElement>(null);
 
   const isAdmin = user?.role !== 'CASHIER';
   const billDiscount = parseFloat(billDiscountStr) || 0;
@@ -59,6 +73,34 @@ export default function POS() {
     }
     loadSummary();
     inputRef.current?.focus();
+  }, []);
+
+  // Close suggestions on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (
+        suggestRef.current && !suggestRef.current.contains(e.target as Node) &&
+        inputRef.current && !inputRef.current.contains(e.target as Node)
+      ) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const fetchSuggestions = useCallback(async (query: string) => {
+    if (query.length < 2) { setSuggestions([]); setShowSuggestions(false); return; }
+    try {
+      const { data } = await client.get('/items', { params: { search: query, active: 'true', page: 1, limit: 8 } });
+      const items: Item[] = Array.isArray(data) ? data : (data.items ?? []);
+      setSuggestions(items.slice(0, 8));
+      setShowSuggestions(items.length > 0);
+      setSelectedSuggestion(-1);
+    } catch {
+      setSuggestions([]);
+      setShowSuggestions(false);
+    }
   }, []);
 
   const loadSummary = async () => {
@@ -75,12 +117,20 @@ export default function POS() {
 
   const lookupBarcode = useCallback(async (code: string) => {
     if (!code.trim()) return;
+    setShowSuggestions(false);
+    setSuggestions([]);
+    if (suggestDebounceRef.current) clearTimeout(suggestDebounceRef.current);
     try {
-      const { data: item } = await client.get<Item>(`/items/barcode/${code.trim()}`);
+      const { data: item } = await client.get<Item>(`/items/barcode/${encodeURIComponent(code.trim())}`);
       addToCart(item);
       setBarcodeInput('');
-    } catch {
-      toast.error(`ไม่พบสินค้า: ${code}`);
+    } catch (err: any) {
+      setBarcodeInput('');
+      if (err.response?.status === 403 && err.response?.data?.blocked) {
+        setBlockedBarcode(code.trim());
+      } else {
+        setNotFoundBarcode(code.trim());
+      }
     }
     inputRef.current?.focus();
   }, []);
@@ -104,6 +154,59 @@ export default function POS() {
       }];
     });
     toast.success(`เพิ่ม: ${item.name}`, { duration: 1500, icon: '✅' });
+  };
+
+  const handleBarcodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setBarcodeInput(val);
+
+    const now = Date.now();
+    const timeSinceLastKey = now - lastKeyTimeRef.current;
+    lastKeyTimeRef.current = now;
+
+    // If typing fast (< 50ms gap = likely scanner), don't show suggestions
+    if (timeSinceLastKey < 50 && val.length > 1) return;
+
+    if (suggestDebounceRef.current) clearTimeout(suggestDebounceRef.current);
+    if (val.trim().length >= 2) {
+      suggestDebounceRef.current = setTimeout(() => fetchSuggestions(val.trim()), 300);
+    } else {
+      setSuggestions([]);
+      setShowSuggestions(false);
+    }
+  };
+
+  const handleBarcodeKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (showSuggestions && suggestions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedSuggestion((i) => Math.min(i + 1, suggestions.length - 1));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedSuggestion((i) => Math.max(i - 1, -1));
+        return;
+      }
+      if (e.key === 'Escape') {
+        setShowSuggestions(false);
+        setSelectedSuggestion(-1);
+        return;
+      }
+      if (e.key === 'Enter' && selectedSuggestion >= 0) {
+        e.preventDefault();
+        const item = suggestions[selectedSuggestion];
+        addToCart(item);
+        setBarcodeInput('');
+        setShowSuggestions(false);
+        setSuggestions([]);
+        return;
+      }
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      lookupBarcode(barcodeInput);
+    }
   };
 
   const updateQty = (itemId: string, qty: number) => {
@@ -221,6 +324,54 @@ export default function POS() {
         />
       )}
 
+      {/* ===== Not Found Modal ===== */}
+      {notFoundBarcode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8 text-center">
+            <div className="w-16 h-16 bg-red-100 rounded-2xl mx-auto flex items-center justify-center mb-4">
+              <AlertTriangle className="text-red-500" size={32} />
+            </div>
+            <h2 className="text-xl font-bold text-gray-900 mb-1">ไม่พบสินค้า</h2>
+            <p className="text-sm text-gray-500 mb-3">ไม่พบสินค้าสำหรับบาร์โค้ด</p>
+            <div className="bg-gray-100 rounded-lg px-4 py-2 mb-5 font-mono text-gray-700 text-sm break-all">
+              {notFoundBarcode}
+            </div>
+            <p className="text-sm text-red-600 font-medium mb-6">กรุณาติดต่อผู้ดูแลระบบ</p>
+            <button
+              onClick={() => { setNotFoundBarcode(null); setTimeout(() => inputRef.current?.focus(), 50); }}
+              className="w-full py-3 rounded-xl bg-gray-800 text-white font-semibold hover:bg-gray-900 transition-colors"
+            >
+              ปิด
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Blocked Barcode Modal ===== */}
+      {blockedBarcode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8 text-center">
+            <div className="w-16 h-16 bg-orange-100 rounded-2xl mx-auto flex items-center justify-center mb-4">
+              <ShieldAlert className="text-orange-500" size={32} />
+            </div>
+            <h2 className="text-xl font-bold text-gray-900 mb-1">บาร์โค้ดไม่ถูกต้อง</h2>
+            <p className="text-sm text-gray-500 mb-3">บาร์โค้ดนี้ถูกระงับการใช้งาน</p>
+            <div className="bg-orange-50 border border-orange-200 rounded-lg px-4 py-2 mb-5 font-mono text-orange-700 text-sm break-all">
+              {blockedBarcode}
+            </div>
+            <p className="text-base font-semibold text-orange-600 mb-6">
+              กรุณาสแกนบาร์โค้ดสินค้าอีกครั้ง
+            </p>
+            <button
+              onClick={() => { setBlockedBarcode(null); setTimeout(() => inputRef.current?.focus(), 50); }}
+              className="w-full py-3 rounded-xl bg-orange-500 text-white font-semibold hover:bg-orange-600 transition-colors"
+            >
+              รับทราบ
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ===== Left panel ===== */}
       <div className="lg:w-1/2 space-y-4">
 
@@ -246,23 +397,69 @@ export default function POS() {
           )}
 
           <label className="label">สแกน / กรอกบาร์โค้ด</label>
-          <div className="flex gap-2">
-            <input
-              ref={inputRef}
-              type="text"
-              value={barcodeInput}
-              onChange={(e) => setBarcodeInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); lookupBarcode(barcodeInput); } }}
-              className="input flex-1"
-              placeholder="สแกนบาร์โค้ดหรือพิมพ์แล้วกด Enter…"
-              autoComplete="off"
-            />
-            <button onClick={() => lookupBarcode(barcodeInput)} className="btn-primary px-3">
-              <Search size={18} />
-            </button>
-            <button onClick={() => setScanning(true)} className="btn-secondary px-3" title="สแกนด้วยกล้อง">
-              <Camera size={18} />
-            </button>
+          <div className="relative">
+            <div className="flex gap-2">
+              <input
+                ref={inputRef}
+                type="text"
+                value={barcodeInput}
+                onChange={handleBarcodeChange}
+                onKeyDown={handleBarcodeKeyDown}
+                onFocus={() => barcodeInput.length >= 2 && suggestions.length > 0 && setShowSuggestions(true)}
+                className="input flex-1"
+                placeholder="สแกนบาร์โค้ดหรือพิมพ์แล้วกด Enter…"
+                autoComplete="off"
+              />
+              <button onClick={() => lookupBarcode(barcodeInput)} className="btn-primary px-3">
+                <Search size={18} />
+              </button>
+              <button onClick={() => setScanning(true)} className="btn-secondary px-3" title="สแกนด้วยกล้อง">
+                <Camera size={18} />
+              </button>
+            </div>
+
+            {/* Suggestion dropdown */}
+            {showSuggestions && suggestions.length > 0 && (
+              <div
+                ref={suggestRef}
+                className="absolute top-full left-0 right-12 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-30 overflow-hidden"
+              >
+                {suggestions.map((item, idx) => (
+                  <button
+                    key={item.id}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      addToCart(item);
+                      setBarcodeInput('');
+                      setShowSuggestions(false);
+                      setSuggestions([]);
+                      setTimeout(() => inputRef.current?.focus(), 50);
+                    }}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-blue-50 transition-colors border-b border-gray-50 last:border-0 ${
+                      idx === selectedSuggestion ? 'bg-blue-50' : ''
+                    }`}
+                  >
+                    {item.imageUrl ? (
+                      <img src={item.imageUrl} alt="" className="w-8 h-8 rounded-lg object-cover shrink-0" />
+                    ) : (
+                      <div className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center text-[9px] text-gray-400 shrink-0 font-mono">
+                        {item.sku.slice(0, 4)}
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
+                      <p className="text-[11px] text-gray-400 truncate">{item.sku} · {item.barcode}</p>
+                    </div>
+                    <span className="text-sm font-semibold text-blue-700 shrink-0">
+                      ฿{parseFloat(String(item.defaultPrice)).toLocaleString('th-TH')}
+                    </span>
+                  </button>
+                ))}
+                <div className="px-3 py-1.5 bg-gray-50 border-t border-gray-100">
+                  <p className="text-[11px] text-gray-400">↑↓ เลือก · Enter ยืนยัน · Esc ปิด</p>
+                </div>
+              </div>
+            )}
           </div>
           <p className="text-xs text-gray-400 mt-1">เครื่องสแกน USB จะส่งข้อมูลอัตโนมัติเมื่อกด Enter</p>
         </div>

@@ -5,7 +5,21 @@ import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
 import { parseBranchExcel } from '../lib/branchParser';
 
 const router = Router();
-const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const EXCEL_MIME = [
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+];
+const importUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (EXCEL_MIME.includes(file.mimetype) || file.originalname.match(/\.(xlsx|xls)$/i)) {
+      cb(null, true);
+    } else {
+      cb(new Error('อนุญาตเฉพาะไฟล์ Excel (.xlsx, .xls) เท่านั้น'));
+    }
+  },
+});
 
 const safeBranch = (b: any) => {
   const { accessToken, ...rest } = b;

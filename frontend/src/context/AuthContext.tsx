@@ -12,10 +12,16 @@ interface AuthUser {
   posMode?: boolean;
 }
 
+interface PosLoginPreview {
+  user: AuthUser;
+  token: string;
+}
+
 interface AuthCtx {
   user: AuthUser | null;
   login: (username: string, password: string) => Promise<void>;
-  posLogin: (pincode: string) => Promise<void>;
+  posLoginPreview: (pincode: string) => Promise<PosLoginPreview>;
+  posLoginCommit: (preview: PosLoginPreview) => void;
   logout: () => void;
   loading: boolean;
 }
@@ -45,11 +51,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(r.data.user);
   };
 
-  // POS pincode login — issues a branch-scoped CASHIER session
-  const posLogin = async (pincode: string) => {
+  // Step 1 — verify PIN and return preview (does NOT set user/token yet)
+  const posLoginPreview = async (pincode: string): Promise<PosLoginPreview> => {
     const r = await client.post('/auth/pos-login', { pincode });
-    localStorage.setItem('token', r.data.token);
-    setUser({ ...r.data.user, posMode: true });
+    return { user: { ...r.data.user, posMode: true }, token: r.data.token };
+  };
+
+  // Step 2 — commit after user confirms branch
+  const posLoginCommit = ({ user: u, token }: PosLoginPreview) => {
+    localStorage.setItem('token', token);
+    setUser(u);
   };
 
   const logout = () => {
@@ -57,7 +68,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
   };
 
-  return <AuthContext.Provider value={{ user, login, posLogin, logout, loading }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ user, login, posLoginPreview, posLoginCommit, logout, loading }}>{children}</AuthContext.Provider>;
 };
 
 export const useAuth = () => {

@@ -47,6 +47,8 @@ model User {
   importDrafts   ImportDraft[]
   unresolvedSales UnresolvedSale[]
   auditLogs      AuditLog[]
+
+  @@index([branchId])
 }
 
 model AuditLog {
@@ -98,6 +100,7 @@ model Item {
   saleDate     DateTime?
   billItems    BillItem[]
 
+  @@index([sku])
   @@index([category, active])
   @@index([active])
   @@index([name])
@@ -123,6 +126,7 @@ model Bill {
   submittedAt DateTime?
   items       BillItem[]
 
+  @@index([userId])
   @@index([branchId, status, createdAt])
   @@index([status, createdAt])
   @@index([saleDate])
@@ -154,6 +158,17 @@ model ImportDraft {
   updatedAt DateTime @updatedAt
 
   @@index([userId])
+}
+
+model BlockedBarcode {
+  id        String   @id @default(cuid())
+  barcode   String   @unique
+  reason    String?
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([barcode])
 }
 
 model UnresolvedSale {

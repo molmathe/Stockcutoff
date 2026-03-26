@@ -2,13 +2,14 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
-import { Hash, Delete, ShoppingCart } from 'lucide-react';
+import { Hash, Delete, ShoppingCart, Building2, CheckCircle, XCircle } from 'lucide-react';
 
 export default function POSLogin() {
-  const { user, posLogin } = useAuth();
+  const { user, posLoginPreview, posLoginCommit } = useAuth();
   const navigate = useNavigate();
   const [pin, setPin] = useState('');
   const [loading, setLoading] = useState(false);
+  const [preview, setPreview] = useState<Awaited<ReturnType<typeof posLoginPreview>> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -28,14 +29,26 @@ export default function POSLogin() {
     if (pin.length < 4) { toast.error('กรุณากรอกรหัส PIN 4 หลัก'); return; }
     setLoading(true);
     try {
-      await posLogin(pin);
-      navigate('/pos');
+      const result = await posLoginPreview(pin);
+      setPreview(result);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'รหัส PIN ไม่ถูกต้อง');
       setPin('');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleConfirm = () => {
+    if (!preview) return;
+    posLoginCommit(preview);
+    navigate('/pos');
+  };
+
+  const handleCancel = () => {
+    setPreview(null);
+    setPin('');
+    setTimeout(() => inputRef.current?.focus(), 50);
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -118,10 +131,53 @@ export default function POSLogin() {
         >
           <span className="flex items-center justify-center gap-2">
             <ShoppingCart size={18} />
-            {loading ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ POS'}
+            {loading ? 'กำลังตรวจสอบ...' : 'เข้าสู่ระบบ POS'}
           </span>
         </button>
       </div>
+
+      {/* Branch confirmation popup */}
+      {preview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8 text-center animate-in fade-in zoom-in-95 duration-200">
+            <div className="w-16 h-16 bg-green-100 rounded-2xl mx-auto flex items-center justify-center mb-4">
+              <Building2 className="text-green-600" size={30} />
+            </div>
+
+            <h2 className="text-lg font-bold text-gray-900 mb-1">ยืนยันการเข้าสู่ระบบ</h2>
+            <p className="text-gray-500 text-sm mb-6">
+              กรุณาตรวจสอบข้อมูลสาขาให้ถูกต้องก่อนดำเนินการต่อ
+            </p>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-2">
+              <p className="text-xs text-blue-500 font-medium uppercase tracking-wide mb-1">สาขา</p>
+              <p className="text-2xl font-bold text-blue-700">{preview.user.branch?.name ?? '—'}</p>
+            </div>
+
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-6">
+              <p className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-0.5">พนักงาน</p>
+              <p className="text-base font-semibold text-gray-700">{preview.user.name}</p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={handleCancel}
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-gray-200 text-gray-600 font-semibold hover:bg-gray-50 hover:border-gray-300 transition-colors"
+              >
+                <XCircle size={18} />
+                ไม่ใช่สาขานี้
+              </button>
+              <button
+                onClick={handleConfirm}
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-green-600 text-white font-semibold hover:bg-green-700 transition-colors shadow-sm"
+              >
+                <CheckCircle size={18} />
+                ถูกต้อง เข้าใช้งาน
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

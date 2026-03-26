@@ -86,6 +86,15 @@ export interface TodaySummary {
   bills: Bill[];
 }
 
+export interface BlockedBarcode {
+  id: string;
+  barcode: string;
+  reason: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ReportTemplate {
   id: string;
   name: string;
