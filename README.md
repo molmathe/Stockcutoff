@@ -4,6 +4,13 @@ Full-stack Point-of-Sale and inventory management web app for multi-branch retai
 
 ## Changelog
 
+### v0.8.0
+- **Unresolved Sales — autocomplete inputs** — branch and barcode fields now show a live dropdown as you type; branch filters by name/code from the branch list; barcode searches items by name/SKU/barcode with 300ms debounce; selecting a suggestion immediately saves and re-triggers auto-match
+- **Unresolved Sales — edit matched fields** — matched branch/item rows show a pencil icon on hover; click to switch back to the autocomplete input and correct a wrong match without deleting the record
+- **POS session persists after page refresh** — `/auth/me` now returns `posMode: true` for system POS users so the POS header banner and logout redirect remain correct after a browser refresh
+- **CENTRAL parser branch column fix** — `Store Name` is now matched before `Store Number` so `rawBranch` correctly maps to branch name instead of store number code
+- **Blocked Barcodes** *(SUPER_ADMIN)* — manage a list of barcodes that are blocked from being scanned at POS
+
 ### v0.7.0
 - **การคัดแยกยอดขายหน้าร้าน** *(SUPER_ADMIN)* — upload a Consolidated Report (Excel) from CENTRAL / MBK / PLAYHOUSE; subtracts booth POS sales from report total to isolate in-store (หน้าร้าน) sales; results split into ✅ Ready / ⚠️ Review / 🔴 Errors; submit creates IMPORT bills for net dept store portion; review rows pushed to Unresolved Sales
   - Supports PERMANENT branch matching via `reportBranchId`; BOOTH branches sharing the same code are correctly deducted
