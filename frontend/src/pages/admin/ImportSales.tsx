@@ -35,6 +35,7 @@ export default function ImportSales() {
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
   const [submitting, setSubmitting] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
   const [resumingDraftId, setResumingDraftId] = useState<string | null>(null);
   const [dupConflict, setDupConflict] = useState<{ saleDate: string; branchName: string }[] | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -118,9 +119,9 @@ export default function ImportSales() {
 
   const handleSaveDraft = async () => {
     if (!preview) return;
-    setSubmitting(true);
+    setSavingDraft(true);
     try {
-      const { data } = await client.post('/reports/import/draft', {
+      await client.post('/reports/import/draft', {
         draftId: (preview as any).draftId,
         platform: (preview as any).platform || selectedPlatform,
         fileName: (preview as any).fileName || 'Unsaved Draft',
@@ -132,7 +133,7 @@ export default function ImportSales() {
     } catch (err) {
       toast.error('บันทึกไม่สำเร็จ');
     } finally {
-      setSubmitting(false);
+      setSavingDraft(false);
     }
   };
 
@@ -453,13 +454,14 @@ export default function ImportSales() {
             </p>
             <div className="flex gap-2 sm:gap-3 flex-wrap justify-end">
               <button onClick={() => setPreview(null)} className="btn-secondary">ยกเลิก</button>
-              <button 
-                onClick={handleSaveDraft} 
+              <button
+                onClick={handleSaveDraft}
+                disabled={savingDraft}
                 className="btn-secondary flex items-center gap-1.5 sm:gap-2 text-gray-700 bg-gray-50 hover:bg-gray-100 hover:border-gray-300"
                 title="บันทึกข้อมูลเก็บไว้จัดการต่อภายหลัง"
               >
                 <Save size={16} />
-                <span className="hidden sm:inline">บันทึกร่าง</span>
+                <span className="hidden sm:inline">{savingDraft ? 'กำลังบันทึก...' : 'บันทึกร่าง'}</span>
               </button>
               <button
                 onClick={handleSubmit}
