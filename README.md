@@ -4,6 +4,14 @@ Full-stack Point-of-Sale and inventory management web app for multi-branch retai
 
 ## Changelog
 
+### v0.9.0
+- **Security — POS PIN rate limiting** — `/api/auth/pos-login` now enforces 5 attempts per 15 minutes per IP (same policy as admin login); prevents brute-force of 4-digit branch PINs
+- **Security — JWT expiry reduced** — admin tokens `24h` → `1h`; POS tokens `12h` → `8h`
+- **Security — failed auth audit logging** — failed admin login and failed POS PIN attempts are now written to the audit log (`LOGIN_FAILED`, `POS_LOGIN_FAILED`) with IP address
+- **Security — CSP hardened** — removed `'unsafe-eval'` from `script-src` in nginx Content-Security-Policy header
+- **Security — nginx body size** — `client_max_body_size` reduced from `500M` to `50M`; matches actual upload limits enforced by multer
+- **Security — health endpoint** — `/health` no longer exposes server timestamp
+
 ### v0.8.0
 - **Unresolved Sales — autocomplete inputs** — branch and barcode fields now show a live dropdown as you type; branch filters by name/code from the branch list; barcode searches items by name/SKU/barcode with 300ms debounce; selecting a suggestion immediately saves and re-triggers auto-match
 - **Unresolved Sales — edit matched fields** — matched branch/item rows show a pencil icon on hover; click to switch back to the autocomplete input and correct a wrong match without deleting the record
@@ -24,7 +32,7 @@ Full-stack Point-of-Sale and inventory management web app for multi-branch retai
 - **Branch column fix (CENTRAL)** — parser now correctly maps `Store Number` (= `reportBranchId`) for branch matching
 
 ### v0.5.0
-- **Bulk image upload** — raised file limits; nginx `client_max_body_size` 500 M
+- **Bulk image upload** — raised file limits; nginx `client_max_body_size` 50M
 - **Branches** — PIN visible in table, edit modal pre-fills PIN, search & filter by type/PIN/active
 - **Items** — category & active filters (server-side, compatible with pagination + CSV export)
 

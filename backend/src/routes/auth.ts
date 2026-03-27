@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../lib/prisma';
 import { authenticate, AuthRequest, getSecret } from '../middleware/auth';
+import { logAudit, getClientIp } from '../lib/audit';
 
 const router = Router();
 
@@ -16,13 +17,14 @@ router.post('/login', async (req: Request, res: Response) => {
     const user = await prisma.user.findUnique({ where: { username }, include: { branch: true } });
 
     if (!user || !user.active || !(await bcrypt.compare(password, user.password))) {
+      await logAudit({ userId: 'UNKNOWN', action: 'LOGIN_FAILED', entity: 'User', detail: { username }, ip: getClientIp(req) });
       return res.status(401).json({ error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
     }
 
     const token = jwt.sign(
       { id: user.id, role: user.role, branchId: user.branchId },
       getSecret(),
-      { expiresIn: '24h' }
+      { expiresIn: '1h' }
     );
 
     res.json({
@@ -41,7 +43,10 @@ router.post('/pos-login', async (req: Request, res: Response) => {
     if (!pincode) return res.status(400).json({ error: 'กรุณาระบุรหัส PIN' });
 
     const branch = await prisma.branch.findUnique({ where: { pincode: String(pincode) } });
-    if (!branch || !branch.active) return res.status(401).json({ error: 'รหัส PIN ไม่ถูกต้อง' });
+    if (!branch || !branch.active) {
+      await logAudit({ userId: 'UNKNOWN', action: 'POS_LOGIN_FAILED', entity: 'Branch', detail: { pincode }, ip: getClientIp(req) });
+      return res.status(401).json({ error: 'รหัส PIN ไม่ถูกต้อง' });
+    }
 
     // Upsert system POS user — atomic, avoids race condition on concurrent logins
     const posUsername = `pos_${branch.code.toLowerCase()}`;
@@ -62,7 +67,7 @@ router.post('/pos-login', async (req: Request, res: Response) => {
     const token = jwt.sign(
       { id: posUser.id, role: 'CASHIER', branchId: branch.id, posMode: true },
       getSecret(),
-      { expiresIn: '12h' }
+      { expiresIn: '8h' }
     );
 
     res.json({

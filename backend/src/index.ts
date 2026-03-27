@@ -48,6 +48,14 @@ const loginLimiter = rateLimit({
   message: { error: 'พยายามเข้าสู่ระบบมากเกินไป กรุณารอ 15 นาทีแล้วลองใหม่' },
 });
 
+const posLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'พยายามเข้าสู่ระบบมากเกินไป กรุณารอ 15 นาทีแล้วลองใหม่' },
+});
+
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 300,
@@ -66,6 +74,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // ── Routes ───────────────────────────────────────────────────────────────────
 app.use('/api/auth/login', loginLimiter);
+app.use('/api/auth/pos-login', posLoginLimiter);
 app.use('/api', apiLimiter);
 
 app.use('/api/auth', authRoutes);
@@ -80,7 +89,7 @@ app.use('/api/dept-reconcile', deptReconcileRoutes);
 app.use('/api/blocked-barcodes', blockedBarcodesRoutes);
 // Removed /api/report-templates route
 
-app.get('/health', (_req, res) => res.json({ status: 'ok', time: new Date() }));
+app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 // ── Audit log retention cleanup (keep 1000 days) ─────────────────────────────
 const cleanAuditLogs = async () => {
