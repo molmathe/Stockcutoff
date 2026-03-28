@@ -4,15 +4,15 @@ This guide covers the current UAT deployment flow:
 
 1. Push code to the `uat` branch.
 2. GitHub Actions builds backend/frontend images and pushes them to GHCR.
-3. GitHub Actions SSHes into the UAT server, updates `IMAGE_TAG`, and runs `docker compose pull && docker compose up -d`.
+3. The self-hosted runner on the UAT server checks out the repo, updates `IMAGE_TAG`, and runs `docker compose pull && docker compose up -d`.
 4. After a successful deploy, GitHub Actions creates a git tag such as `uat-v0.7.0+abcdef123456.142`.
 
 ## Prerequisites
 
-- Ubuntu 24.04+ server reachable over SSH
+- Ubuntu 24.04+ server for UAT
 - Cloudflare Tunnel token
 - GHCR package access for the server
-- GitHub Actions secrets configured for SSH deploy
+- A GitHub self-hosted runner registered to this repository on the UAT server
 
 ## 1. One-Time Server Setup
 
@@ -27,6 +27,15 @@ After the script finishes:
 
 - Log out and back in once so the deployment user can run Docker without `sudo`
 - Run `docker login ghcr.io` on the server with a token that can read private packages
+- Install and register a GitHub self-hosted runner on the server
+
+Recommended runner labels:
+
+- `self-hosted`
+- `Linux`
+- `X64`
+- `uat`
+- `stockcutoff`
 
 ## 2. Create the Server `.env`
 
@@ -46,17 +55,15 @@ Notes:
 - `IMAGE_TAG` is updated automatically by GitHub Actions on each deploy
 - `PORT` is bound to `127.0.0.1` only; internet traffic should enter through Cloudflare Tunnel
 
-## 3. Configure GitHub Actions Secrets
+## 3. Self-Hosted Runner
 
-Set these repository secrets:
+The deploy job now runs directly on the UAT server through a self-hosted runner.
 
-- `UAT_SSH_HOST`
-- `UAT_SSH_PORT`
-- `UAT_SSH_USER`
-- `UAT_SSH_KEY`
-- `UAT_DEPLOY_PATH`
+The runner host must have:
 
-Recommended `UAT_DEPLOY_PATH`: `/opt/stockcutoff-uat`
+- access to `/opt/stockcutoff-uat`
+- Docker access for the runner user
+- a successful `docker login ghcr.io`
 
 ## 4. Versioning
 

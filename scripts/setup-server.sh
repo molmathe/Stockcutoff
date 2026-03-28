@@ -50,6 +50,6 @@ Next steps:
 1. Log out and log back in so $TARGET_USER can run docker without sudo.
 2. Create $DEPLOY_PATH/.env with DB_PASSWORD, JWT_SECRET, FRONTEND_URL, TUNNEL_TOKEN, PORT, and IMAGE_TAG.
 3. Run 'docker login ghcr.io' on the server once with a token that can read private packages.
-4. Add GitHub Actions secrets: UAT_SSH_HOST, UAT_SSH_PORT, UAT_SSH_USER, UAT_SSH_KEY, and UAT_DEPLOY_PATH.
+4. Install and register the GitHub self-hosted runner on this server for the repository.
 5. Push to the uat branch to trigger build, deploy, and git tagging.
 EOF

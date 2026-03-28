@@ -94,58 +94,39 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy_uat:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - uat
+      - stockcutoff
     needs:
       - metadata
       - build_and_push
     permissions:
       contents: read
+    env:
+      DEPLOY_PATH: /opt/stockcutoff-uat
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure SSH access
-        env:
-          UAT_SSH_KEY: ${{ secrets.UAT_SSH_KEY }}
-          UAT_SSH_HOST: ${{ secrets.UAT_SSH_HOST }}
-          UAT_SSH_PORT: ${{ secrets.UAT_SSH_PORT }}
+      - name: Sync deployment bundle locally
         run: |
           set -euo pipefail
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$UAT_SSH_KEY" > ~/.ssh/uat_deploy_key
-          chmod 600 ~/.ssh/uat_deploy_key
-          ssh-keyscan -p "${UAT_SSH_PORT:-22}" "$UAT_SSH_HOST" >> ~/.ssh/known_hosts
+          install -d -m 0755 "$DEPLOY_PATH" "$DEPLOY_PATH/nginx"
+          install -m 0644 docker-compose.yml "$DEPLOY_PATH/docker-compose.yml"
+          install -m 0644 nginx/nginx.conf "$DEPLOY_PATH/nginx/nginx.conf"
 
-      - name: Sync deployment bundle to server
-        env:
-          UAT_SSH_HOST: ${{ secrets.UAT_SSH_HOST }}
-          UAT_SSH_PORT: ${{ secrets.UAT_SSH_PORT }}
-          UAT_SSH_USER: ${{ secrets.UAT_SSH_USER }}
-          UAT_DEPLOY_PATH: ${{ secrets.UAT_DEPLOY_PATH }}
-        run: |
-          set -euo pipefail
-          ssh -i ~/.ssh/uat_deploy_key -p "${UAT_SSH_PORT:-22}" "$UAT_SSH_USER@$UAT_SSH_HOST" \
-            "mkdir -p '$UAT_DEPLOY_PATH/nginx'"
-          tar czf - docker-compose.yml nginx/nginx.conf | \
-            ssh -i ~/.ssh/uat_deploy_key -p "${UAT_SSH_PORT:-22}" "$UAT_SSH_USER@$UAT_SSH_HOST" \
-              "tar xzf - -C '$UAT_DEPLOY_PATH'"
-
-      - name: Pull and deploy on UAT server
+      - name: Pull and deploy on self-hosted UAT runner
         env:
           IMAGE_TAG: ${{ needs.metadata.outputs.image_tag }}
-          UAT_SSH_HOST: ${{ secrets.UAT_SSH_HOST }}
-          UAT_SSH_PORT: ${{ secrets.UAT_SSH_PORT }}
-          UAT_SSH_USER: ${{ secrets.UAT_SSH_USER }}
-          UAT_DEPLOY_PATH: ${{ secrets.UAT_DEPLOY_PATH }}
         run: |
-          set -euo pipefail
-          ssh -i ~/.ssh/uat_deploy_key -p "${UAT_SSH_PORT:-22}" "$UAT_SSH_USER@$UAT_SSH_HOST" \
-            "DEPLOY_PATH='$UAT_DEPLOY_PATH' IMAGE_TAG='$IMAGE_TAG' bash -s" <<'EOF'
           set -euo pipefail
 
           cd "$DEPLOY_PATH"
 
           if [ ! -f .env ]; then
-            echo "Missing $DEPLOY_PATH/.env on server." >&2
+            echo "Missing $DEPLOY_PATH/.env on runner host." >&2
             exit 1
           fi
 
@@ -161,7 +142,6 @@ jobs:
           app_port="$(awk -F= '/^PORT=/{print $2}' .env | tail -n 1)"
           app_port="${app_port:-8082}"
           curl --fail --silent --show-error "http://127.0.0.1:${app_port}/health" >/dev/null
-          EOF
 
   create_git_tag:
     runs-on: ubuntu-latest
