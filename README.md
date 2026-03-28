@@ -4,6 +4,12 @@ Full-stack Point-of-Sale and inventory management web app for multi-branch retai
 
 ## Changelog
 
+### v1.1.0
+- **Branch — Disable / Enable** — quick Power toggle button in the branch table; enable or disable a branch without opening the edit modal; green = active, gray = disabled
+- **Branch — Soft Delete** — deleting a branch now sets `deletedAt` instead of hard-deleting; branch disappears from all lists but data (bills, audit logs) is preserved; POS pin-login, reports, and reconcile queries all exclude soft-deleted branches
+- **POS — Bill Discount by %** — staff can apply a bill-level discount of 1–99%; input shows the calculated ฿ amount as a hint; supports round-trip with edit-bill (% is restored from stored ฿ value)
+- **POS — Full Discount Summary** — totals section now shows a clear breakdown: ยอดรวม (ก่อนส่วนลด), ส่วนลดรายการ, ส่วนลดบิล X%, รวมส่วนลดทั้งหมด, and ยอดสุทธิ
+
 ### v1.0.0
 - **Database Management** (SUPER_ADMIN) — export and import the entire PostgreSQL database directly from the admin UI; includes gzip compression and safety confirmation modals.
 - **Comprehensive Audit Logging** — the system now logs almost all administrative actions, including:

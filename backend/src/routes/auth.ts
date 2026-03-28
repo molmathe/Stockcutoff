@@ -46,7 +46,7 @@ router.post('/pos-login', async (req: Request, res: Response) => {
     if (!pincode) return res.status(400).json({ error: 'กรุณาระบุรหัส PIN' });
 
     const branch = await prisma.branch.findUnique({ where: { pincode: String(pincode) } });
-    if (!branch || !branch.active) {
+    if (!branch || !branch.active || branch.deletedAt) {
       await logAudit({ userId: 'UNKNOWN', action: 'POS_LOGIN_FAILED', entity: 'Branch', detail: { pincode }, ip: getClientIp(req) });
       return res.status(401).json({ error: 'รหัส PIN ไม่ถูกต้อง' });
     }

@@ -31,7 +31,7 @@ const safeBranch = (b: any) => {
 router.post('/import/preview', authenticate, requireAdmin, importUpload.single('file'), async (req: AuthRequest, res: Response) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'กรุณาอัพโหลดไฟล์ Excel' });
-    const existing = await prisma.branch.findMany({ select: { code: true } });
+    const existing = await prisma.branch.findMany({ where: { deletedAt: null }, select: { code: true } });
     const codes = new Set(existing.map((b) => b.code));
     const rows = await parseBranchExcel(req.file.buffer, codes);
     res.json(rows);
@@ -79,7 +79,7 @@ router.post('/import/submit', authenticate, requireAdmin, async (req: AuthReques
 // GET all branches
 router.get('/', authenticate, async (_req, res: Response) => {
   try {
-    const branches = await prisma.branch.findMany({ orderBy: { name: 'asc' } });
+    const branches = await prisma.branch.findMany({ where: { deletedAt: null }, orderBy: { name: 'asc' } });
     res.json(branches.map(safeBranch));
   } catch {
     res.status(500).json({ error: 'Server error' });
@@ -89,7 +89,7 @@ router.get('/', authenticate, async (_req, res: Response) => {
 // GET single branch
 router.get('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const branch = await prisma.branch.findUnique({ where: { id: req.params.id } });
+    const branch = await prisma.branch.findFirst({ where: { id: req.params.id, deletedAt: null } });
     if (!branch) return res.status(404).json({ error: 'ไม่พบสาขา' });
     res.json(safeBranch(branch));
   } catch {
@@ -177,24 +177,24 @@ router.put('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Res
   }
 });
 
-// DELETE bulk
+// DELETE bulk (soft delete)
 router.delete('/bulk', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const { ids } = req.body;
-    await prisma.branch.deleteMany({ where: { id: { in: ids } } });
+    await prisma.branch.updateMany({ where: { id: { in: ids }, deletedAt: null }, data: { deletedAt: new Date() } });
     res.json({ message: `ลบ ${ids.length} สาขาเรียบร้อย` });
   } catch {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// DELETE single
+// DELETE single (soft delete)
 router.delete('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const branch = await prisma.branch.findUnique({ where: { id: req.params.id } });
+    const branch = await prisma.branch.findFirst({ where: { id: req.params.id, deletedAt: null } });
     if (!branch) return res.status(404).json({ error: 'ไม่พบสาขา' });
 
-    await prisma.branch.delete({ where: { id: req.params.id } });
+    await prisma.branch.update({ where: { id: req.params.id }, data: { deletedAt: new Date() } });
 
     // Audit log
     await logAudit({

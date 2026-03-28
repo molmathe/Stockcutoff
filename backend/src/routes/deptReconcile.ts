@@ -82,14 +82,14 @@ router.post('/preview', authenticate, requireSuperAdmin, upload.single('file'), 
     //       All types (BOOTH included) → used to fetch booth POS bills
     const uniqueBranchCodes = [...new Set([...consolidatedMap.values()].map(r => r.rawBranch))];
     const branches = await prisma.branch.findMany({
-      where: { reportBranchId: { in: uniqueBranchCodes }, type: 'PERMANENT', active: true },
+      where: { reportBranchId: { in: uniqueBranchCodes }, type: 'PERMANENT', active: true, deletedAt: null },
       select: { id: true, name: true, code: true, reportBranchId: true },
     });
     const branchByCode = new Map(branches.map(b => [b.reportBranchId!, b]));
 
     // Fetch ALL branches sharing those reportBranchIds (includes BOOTH branches)
     const allRelatedBranches = await prisma.branch.findMany({
-      where: { reportBranchId: { in: uniqueBranchCodes }, active: true },
+      where: { reportBranchId: { in: uniqueBranchCodes }, active: true, deletedAt: null },
       select: { id: true, reportBranchId: true },
     });
     // Map every branch ID (any type) → the PERMANENT branch ID for that reportBranchId

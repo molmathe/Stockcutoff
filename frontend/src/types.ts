@@ -18,6 +18,7 @@ export interface Branch {
   reportBranchId: string | null;
   tags: string[];
   pincode?: string | null;
+  deletedAt?: string | null;
   createdAt: string;
 }
 

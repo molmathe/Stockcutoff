@@ -38,7 +38,7 @@ export default function POS() {
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [scanning, setScanning] = useState(false);
   const [notes, setNotes] = useState('');
-  const [billDiscountStr, setBillDiscountStr] = useState('0');
+  const [billDiscountPctStr, setBillDiscountPctStr] = useState('');
   const [saving, setSaving] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranch, setSelectedBranch] = useState(user?.branchId || '');
@@ -64,7 +64,7 @@ export default function POS() {
   const suggestRef = useRef<HTMLDivElement>(null);
 
   const isAdmin = user?.role !== 'CASHIER';
-  const billDiscount = parseFloat(billDiscountStr) || 0;
+  const billDiscountPct = Math.min(99, Math.max(0, parseInt(billDiscountPctStr) || 0));
   const fmt = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2 });
 
   useEffect(() => {
@@ -229,14 +229,18 @@ export default function POS() {
 
   const clearCart = () => {
     setCartItems([]);
-    setBillDiscountStr('0');
+    setBillDiscountPctStr('');
     setNotes('');
     setEditingBillId(null);
     setLastSaved(null);
   };
 
-  const subtotal = cartItems.reduce((s, c) => s + c.price * c.quantity - c.discount, 0);
-  const total = Math.max(0, subtotal - billDiscount);
+  const grossSubtotal = cartItems.reduce((s, c) => s + c.price * c.quantity, 0);
+  const totalItemDiscounts = cartItems.reduce((s, c) => s + c.discount, 0);
+  const subtotal = grossSubtotal - totalItemDiscounts;
+  const billDiscountAmt = Math.round(subtotal * billDiscountPct) / 100;
+  const totalDiscount = totalItemDiscounts + billDiscountAmt;
+  const total = Math.max(0, subtotal - billDiscountAmt);
 
   const saveBill = async () => {
     if (cartItems.length === 0) { toast.error('ตะกร้าว่างเปล่า'); return; }
@@ -246,7 +250,7 @@ export default function POS() {
     try {
       const payload = {
         branchId,
-        discount: billDiscount,
+        discount: billDiscountAmt,
         notes,
         items: cartItems.map((c) => ({
           itemId: c.itemId,
@@ -278,21 +282,23 @@ export default function POS() {
 
   const loadBillForEdit = (bill: Bill) => {
     setEditingBillId(bill.id);
-    setBillDiscountStr(String(bill.discount || '0'));
     setNotes(bill.notes || '');
-    setCartItems(
-      bill.items.map((bi) => ({
-        itemId: bi.itemId,
-        name: bi.item?.name || `สินค้า (${bi.itemId.slice(0, 8)})`,
-        sku: bi.item?.sku || '',
-        barcode: bi.item?.barcode || '',
-        imageUrl: bi.item?.imageUrl || null,
-        quantity: bi.quantity,
-        price: parseFloat(String(bi.price)),
-        discount: parseFloat(String(bi.discount || 0)),
-        discountStr: String(bi.discount || '0'),
-      }))
-    );
+    const billItems = bill.items.map((bi) => ({
+      itemId: bi.itemId,
+      name: bi.item?.name || `สินค้า (${bi.itemId.slice(0, 8)})`,
+      sku: bi.item?.sku || '',
+      barcode: bi.item?.barcode || '',
+      imageUrl: bi.item?.imageUrl || null,
+      quantity: bi.quantity,
+      price: parseFloat(String(bi.price)),
+      discount: parseFloat(String(bi.discount || 0)),
+      discountStr: String(bi.discount || '0'),
+    }));
+    const billSub = billItems.reduce((s, c) => s + c.price * c.quantity - c.discount, 0);
+    const storedDiscount = parseFloat(String(bill.discount || 0));
+    const pct = billSub > 0 && storedDiscount > 0 ? Math.round(storedDiscount / billSub * 100) : 0;
+    setBillDiscountPctStr(pct > 0 ? String(pct) : '');
+    setCartItems(billItems);
     setShowSummary(false);
     toast(`แก้ไขบิล ${bill.billNumber}`, { icon: '✏️' });
     setTimeout(() => inputRef.current?.focus(), 100);
@@ -483,16 +489,26 @@ export default function POS() {
           <h3 className="font-medium text-gray-700 mb-2">ตัวเลือกบิล</h3>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">ส่วนลดบิล (฿)</label>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={billDiscountStr}
-                onKeyDown={numericKeyDown}
-                onChange={(e) => setBillDiscountStr(e.target.value.replace(/[^\d.]/g, ''))}
-                className="input"
-                placeholder="0"
-              />
+              <label className="label">ส่วนลดบิล (%)</label>
+              <div className="relative">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={billDiscountPctStr}
+                  maxLength={2}
+                  onChange={(e) => {
+                    const v = e.target.value.replace(/\D/g, '');
+                    const n = parseInt(v) || 0;
+                    setBillDiscountPctStr(n > 99 ? '99' : v);
+                  }}
+                  className="input pr-8"
+                  placeholder="0"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-semibold text-sm">%</span>
+              </div>
+              {billDiscountPct > 0 && (
+                <p className="text-xs text-orange-600 mt-0.5">= -฿{fmt(billDiscountAmt)}</p>
+              )}
             </div>
             <div>
               <label className="label">หมายเหตุ</label>
@@ -721,14 +737,34 @@ export default function POS() {
 
           {/* Totals */}
           <div className="border-t pt-3 mt-3 space-y-1">
-            <div className="flex justify-between text-sm text-gray-500">
-              <span>ยอดรวมย่อย</span>
-              <span>฿{fmt(subtotal)}</span>
-            </div>
-            {billDiscount > 0 && (
+            {totalDiscount > 0 && (
+              <div className="flex justify-between text-sm text-gray-500">
+                <span>ยอดรวม (ก่อนส่วนลด)</span>
+                <span>฿{fmt(grossSubtotal)}</span>
+              </div>
+            )}
+            {totalItemDiscounts > 0 && (
+              <div className="flex justify-between text-sm text-orange-500">
+                <span>ส่วนลดรายการ</span>
+                <span>-฿{fmt(totalItemDiscounts)}</span>
+              </div>
+            )}
+            {billDiscountPct > 0 && (
               <div className="flex justify-between text-sm text-orange-600">
-                <span>ส่วนลดบิล</span>
-                <span>-฿{fmt(billDiscount)}</span>
+                <span>ส่วนลดบิล {billDiscountPct}%</span>
+                <span>-฿{fmt(billDiscountAmt)}</span>
+              </div>
+            )}
+            {totalDiscount > 0 && (
+              <div className="flex justify-between text-sm font-semibold text-red-600 bg-red-50 rounded px-2 py-1">
+                <span>รวมส่วนลดทั้งหมด</span>
+                <span>-฿{fmt(totalDiscount)}</span>
+              </div>
+            )}
+            {totalDiscount === 0 && (
+              <div className="flex justify-between text-sm text-gray-500">
+                <span>ยอดรวมย่อย</span>
+                <span>฿{fmt(subtotal)}</span>
               </div>
             )}
             <div className="flex justify-between text-lg font-bold text-gray-900 pt-1 border-t">

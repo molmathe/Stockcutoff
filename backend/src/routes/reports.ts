@@ -98,7 +98,7 @@ function generateImportBillNumber(date: Date): string {
 }
 
 async function remapImportRows(inputRows: any[], maxRows = 10000) {
-  const allBranches = await prisma.branch.findMany({ where: { active: true } });
+  const allBranches = await prisma.branch.findMany({ where: { active: true, deletedAt: null } });
   const allItems = await prisma.item.findMany({ where: { active: true } });
 
   const rows: any[] = [];
@@ -239,7 +239,7 @@ router.get('/dashboard', authenticate, requireAdmin, async (req: AuthRequest, re
     let branchSales: any[] = [];
     if (req.user!.role === 'SUPER_ADMIN') {
       const [branches, grouped] = await Promise.all([
-        prisma.branch.findMany({ where: { active: true }, select: { id: true, name: true } }),
+        prisma.branch.findMany({ where: { active: true, deletedAt: null }, select: { id: true, name: true } }),
         prisma.bill.groupBy({
           by: ['branchId'],
           where: where7Days,

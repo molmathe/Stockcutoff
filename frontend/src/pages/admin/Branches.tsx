@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Plus, Pencil, Trash2, Building2, KeyRound, Link2, Copy, Check, Tag, X, FileUp, FileSpreadsheet, Upload, Search, Filter } from 'lucide-react';
+import { Plus, Pencil, Trash2, Building2, KeyRound, Link2, Copy, Check, Tag, X, FileUp, FileSpreadsheet, Upload, Search, Filter, Power } from 'lucide-react';
 import client from '../../api/client';
 import Modal from '../../components/Modal';
 import type { Branch, BranchType } from '../../types';
@@ -86,6 +86,15 @@ export default function Branches() {
     mutationFn: (ids: string[]) => client.delete('/branches/bulk', { data: { ids } }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['branches'] }); setSelected([]); toast.success('ลบเรียบร้อย'); },
     onError: () => toast.error('ลบหลายรายการไม่สำเร็จ'),
+  });
+
+  const toggleActiveMutation = useMutation({
+    mutationFn: ({ id, active }: { id: string; active: boolean }) => client.put(`/branches/${id}`, { active }),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['branches'] });
+      toast.success(vars.active ? 'เปิดใช้งานสาขาแล้ว' : 'ปิดใช้งานสาขาแล้ว');
+    },
+    onError: () => toast.error('เปลี่ยนสถานะไม่สำเร็จ'),
   });
 
   const openAdd = () => { setEditing(null); setForm(EMPTY); setTagInput(''); setShowModal(true); };
@@ -344,6 +353,13 @@ export default function Branches() {
                   </td>
                   <td className="table-cell text-right">
                     <div className="flex gap-2 justify-end">
+                      <button
+                        onClick={() => toggleActiveMutation.mutate({ id: b.id, active: !b.active })}
+                        className={b.active ? 'text-green-500 hover:text-green-700' : 'text-gray-400 hover:text-gray-600'}
+                        title={b.active ? 'ปิดใช้งาน' : 'เปิดใช้งาน'}
+                      >
+                        <Power size={16} />
+                      </button>
                       <button onClick={() => openEdit(b)} className="text-blue-500 hover:text-blue-700"><Pencil size={16} /></button>
                       <button onClick={() => handleDelete(b.id)} className="text-red-400 hover:text-red-600"><Trash2 size={16} /></button>
                     </div>
