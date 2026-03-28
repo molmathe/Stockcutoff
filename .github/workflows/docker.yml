@@ -138,6 +138,7 @@ jobs:
 
           docker compose pull
           docker compose up -d --remove-orphans
+          docker compose restart nginx
 
           app_port="$(awk -F= '/^PORT=/{print $2}' .env | tail -n 1)"
           app_port="${app_port:-8082}"
