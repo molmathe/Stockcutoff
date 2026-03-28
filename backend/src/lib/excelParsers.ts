@@ -88,7 +88,7 @@ export async function parseExcelData(buffer: Buffer, platform: ImportPlatform): 
     totalCol = findColIdx(headers, ['net sale', 'sales amt', 'amount']);
   } else if (platform === 'CENTRAL') {
     dateCol = findColIdx(headers, ['sales date', 'date']);
-    branchCol = findColIdx(headers, ['store name', 'store number']);
+    branchCol = findColIdx(headers, ['store number', 'store name']);
     itemCol = findColIdx(headers, ['barcode', 'sku']);
     qtyCol = findColIdx(headers, ['sales quantity', 'qty']);
     totalCol = findColIdx(headers, ['total net sales', 'net sales']);
