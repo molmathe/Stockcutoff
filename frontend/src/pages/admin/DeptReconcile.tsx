@@ -39,9 +39,20 @@ interface ErrorRow {
   rawItem: string;
   qty: number;
   amount: number;
-  issue: 'UNKNOWN_BRANCH' | 'UNKNOWN_ITEM' | 'ORPHANED_BOOTH' | 'INVALID_DATA';
+  issue: 'UNKNOWN_BRANCH' | 'UNKNOWN_ITEM' | 'ORPHANED_BOOTH' | 'INVALID_DATA' | 'INVALID_BOOTH_DATA';
   detail: string;
   rowNum: number | null;
+}
+
+interface DeductionRow {
+  rowNum: number;
+  date: string;
+  rawBranch: string;
+  rawItem: string;
+  qty: number;
+  price: number;
+  amount: number;
+  reason: 'QTY_NEGATIVE' | 'QTY_ZERO' | 'PRICE_ZERO';
 }
 
 interface ReconcilePreview {
@@ -50,8 +61,11 @@ interface ReconcilePreview {
     consolidatedRows: number;
     deptStoreRows: number;
     boothCoveredRows: number;
+    matchedRows: number;
+    noBoothRows: number;
     reviewRows: number;
     errorRows: number;
+    deductionRows: number;
     totalConsolidatedQty: number;
     totalConsolidatedAmount: number;
     totalBoothQty: number;
@@ -63,6 +77,7 @@ interface ReconcilePreview {
   boothCovered: BoothCoveredRow[];
   reviewNeeded: ReviewRow[];
   errorLogs: ErrorRow[];
+  deductionRows: DeductionRow[];
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -74,28 +89,36 @@ const PLATFORMS = [
 ];
 
 const ISSUE_LABEL: Record<string, string> = {
-  NEGATIVE_QTY:    'จำนวนติดลบ',
-  NEGATIVE_AMOUNT: 'ยอดเงินติดลบ',
-  NEGATIVE_BOTH:   'จำนวน+ยอดติดลบ',
-  UNKNOWN_BRANCH:  'ไม่พบสาขา',
-  UNKNOWN_ITEM:    'ไม่พบสินค้า',
-  ORPHANED_BOOTH:  'บูธสแกนแต่ไม่มีในรายงาน',
-  INVALID_DATA:    'ข้อมูลไม่ครบ',
+  NEGATIVE_QTY:       'จำนวนติดลบ',
+  NEGATIVE_AMOUNT:    'ยอดเงินติดลบ',
+  NEGATIVE_BOTH:      'จำนวน+ยอดติดลบ',
+  UNKNOWN_BRANCH:     'ไม่พบสาขา',
+  UNKNOWN_ITEM:       'ไม่พบสินค้า',
+  ORPHANED_BOOTH:     'บูธสแกนแต่ไม่มีในรายงาน',
+  INVALID_DATA:       'ข้อมูลไม่ครบ',
+  INVALID_BOOTH_DATA: 'ข้อมูลบูธผิดปกติ (qty≤0/price=0)',
 };
 
 const ISSUE_COLOR: Record<string, string> = {
-  NEGATIVE_QTY:    'bg-orange-100 text-orange-700',
-  NEGATIVE_AMOUNT: 'bg-orange-100 text-orange-700',
-  NEGATIVE_BOTH:   'bg-red-100 text-red-700',
-  UNKNOWN_BRANCH:  'bg-red-100 text-red-700',
-  UNKNOWN_ITEM:    'bg-yellow-100 text-yellow-700',
-  ORPHANED_BOOTH:  'bg-purple-100 text-purple-700',
-  INVALID_DATA:    'bg-gray-100 text-gray-600',
+  NEGATIVE_QTY:        'bg-orange-100 text-orange-700',
+  NEGATIVE_AMOUNT:     'bg-orange-100 text-orange-700',
+  NEGATIVE_BOTH:       'bg-red-100 text-red-700',
+  UNKNOWN_BRANCH:      'bg-red-100 text-red-700',
+  UNKNOWN_ITEM:        'bg-yellow-100 text-yellow-700',
+  ORPHANED_BOOTH:      'bg-purple-100 text-purple-700',
+  INVALID_DATA:        'bg-gray-100 text-gray-600',
+  INVALID_BOOTH_DATA:  'bg-pink-100 text-pink-700',
 };
 
 const fmt = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2 });
 
-type TabId = 'all' | 'sales' | 'booth' | 'review' | 'errors';
+const DEDUCTION_LABEL: Record<string, string> = {
+  QTY_NEGATIVE: 'จำนวนติดลบ',
+  QTY_ZERO:     'จำนวน = 0',
+  PRICE_ZERO:   'ราคา = 0',
+};
+
+type TabId = 'overview' | 'booth_unmatched' | 'review' | 'deduction';
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -128,7 +151,7 @@ export default function DeptReconcile() {
   const [saving, setSaving]         = useState(false);
   const [resumingId, setResumingId] = useState<string | null>(null);
   const [preview, setPreview]       = useState<ReconcilePreview | null>(null);
-  const [activeTab, setActiveTab]   = useState<TabId>('sales');
+  const [activeTab, setActiveTab]   = useState<TabId>('overview');
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [dupConflict, setDupConflict] = useState<{ saleDate: string; branchName: string }[] | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -179,7 +202,7 @@ export default function DeptReconcile() {
       const { data } = await client.post(`/dept-reconcile/draft/${id}/resume`);
       setPreview(data);
       setPlatform(data.platform || 'CENTRAL');
-      setActiveTab('all');
+      setActiveTab('overview');
       setExpandedRows(new Set());
     } catch {
       toast.error('ไม่สามารถเรียกคืนฉบับร่างได้');
@@ -208,7 +231,7 @@ export default function DeptReconcile() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setPreview({ ...data, _fileName: file.name });
-      setActiveTab('all');
+      setActiveTab('overview');
       setExpandedRows(new Set());
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'วิเคราะห์ไฟล์ไม่สำเร็จ');
@@ -459,303 +482,222 @@ export default function DeptReconcile() {
             </div>
           </div>
 
-          {/* Tabs */}
-          <div className="bg-white border-b px-5 shrink-0 flex gap-0 overflow-x-auto">
-            {([
-              ['all',    `📋 สรุปทั้งหมด (${stats!.deptStoreRows + (stats!.boothCoveredRows ?? 0)})`, 'border-indigo-500 text-indigo-700'],
-              ['sales',  `✅ ยอดขายหน้าร้าน (${stats!.deptStoreRows})`,                              'border-green-500 text-green-700'],
-              ['booth',  `🔵 บูธขายครบ (${stats!.boothCoveredRows ?? 0})`,                            'border-blue-500 text-blue-700'],
-              ['review', `⚠️ ต้องตรวจสอบ (${stats!.reviewRows})`,                                    'border-orange-500 text-orange-700'],
-              ['errors', `🔴 ข้อผิดพลาด (${stats!.errorRows})`,                                      'border-red-500 text-red-600'],
-            ] as const).map(([tab, label, activeClass]) => (
-              <button key={tab} onClick={() => setActiveTab(tab as TabId)}
-                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap
-                  ${activeTab === tab ? activeClass : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
-                {label}
-              </button>
-            ))}
-          </div>
+          {/* Tabs — 4 tabs */}
+          {(() => {
+            const boothUnmatched = preview.errorLogs.filter(r => r.issue === 'ORPHANED_BOOTH' || r.issue === 'INVALID_BOOTH_DATA');
+            const reviewAll = [
+              ...preview.reviewNeeded,
+              ...preview.errorLogs.filter(r => r.issue === 'UNKNOWN_BRANCH' || r.issue === 'UNKNOWN_ITEM' || r.issue === 'INVALID_DATA'),
+            ];
+            const overviewCount = stats!.deptStoreRows + (stats!.boothCoveredRows ?? 0);
+            return (
+              <>
+                <div className="bg-white border-b px-5 shrink-0 flex gap-0 overflow-x-auto">
+                  {([
+                    ['overview',        `📋 ภาพรวม (${overviewCount})`,                             'border-indigo-500 text-indigo-700'],
+                    ['booth_unmatched', `📭 ไม่พบในรายงาน (${boothUnmatched.length})`,              'border-gray-500 text-gray-600'],
+                    ['review',          `⚠️ ต้องตรวจสอบ (${reviewAll.length})`,                    'border-orange-500 text-orange-700'],
+                    ['deduction',       `🔻 ข้อมูลหักลบ (${stats!.deductionRows ?? 0})`,            'border-purple-500 text-purple-700'],
+                  ] as const).map(([tab, label, activeClass]) => (
+                    <button key={tab} onClick={() => setActiveTab(tab as TabId)}
+                      className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap
+                        ${activeTab === tab ? activeClass : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
 
-          {/* Table */}
-          <div className="flex-1 overflow-auto bg-gray-50">
-            {activeTab === 'all' && (() => {
-              const allMatched = [
-                ...preview.deptStoreSales.map(r => ({ ...r, _type: 'store' as const })),
-                ...(preview.boothCovered ?? []).map(r => ({ ...r, _type: 'booth' as const, unitPrice: 0 })),
-              ].sort((a, b) => a.date.localeCompare(b.date) || a.branchName.localeCompare(b.branchName) || a.itemName.localeCompare(b.itemName));
-              return (
-                <table className="w-full text-sm">
-                  <thead className="bg-white sticky top-0 shadow-sm">
-                    <tr>
-                      <th className="table-header w-8"></th>
-                      <th className="table-header">วันที่</th>
-                      <th className="table-header">สาขา</th>
-                      <th className="table-header">สินค้า</th>
-                      <th className="table-header text-right">รายงานรวม</th>
-                      <th className="table-header text-right">บูธ POS (หัก)</th>
-                      <th className="table-header text-right">ยอดหน้าร้าน</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {allMatched.length === 0 ? (
-                      <tr><td colSpan={7} className="p-8 text-center text-gray-400">ไม่มีข้อมูล</td></tr>
-                    ) : allMatched.map((row, i) => {
-                      const isBooth = row._type === 'booth';
-                      return (
-                        <tr key={i} className={isBooth ? 'bg-blue-50/30 hover:bg-blue-50/50' : 'hover:bg-green-50/20'}>
-                          <td className="table-cell text-center">
-                            {isBooth
-                              ? <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">บูธ</span>
-                              : <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium">ร้าน</span>}
-                          </td>
-                          <td className="table-cell text-xs font-mono">{row.date}</td>
-                          <td className="table-cell text-xs">
-                            <p className="font-medium">{row.branchName}</p>
-                            <p className="text-gray-400 text-[10px]">{row.branchCode}</p>
-                          </td>
-                          <td className="table-cell text-xs">
-                            <p className="font-medium truncate max-w-[160px]" title={row.itemName}>{row.itemName}</p>
-                            <p className="text-gray-400 font-mono text-[10px]">{row.itemSku} / {row.itemBarcode}</p>
-                          </td>
-                          <td className="table-cell text-right text-xs text-gray-500">
-                            <p>{row.consolidatedQty}</p>
-                            <p>฿{fmt(row.consolidatedAmount)}</p>
-                          </td>
-                          <td className="table-cell text-right text-xs text-blue-500">
-                            {row.boothQty > 0 ? (
-                              <>
-                                <p>-{row.boothQty}</p>
-                                <p>-฿{fmt(row.boothAmount)}</p>
-                              </>
-                            ) : <span className="text-gray-300">—</span>}
-                          </td>
-                          <td className="table-cell text-right text-xs">
-                            {isBooth ? (
-                              <span className="text-blue-600 font-medium">บูธขายครบ ✓</span>
-                            ) : (
-                              <>
-                                <p className="font-bold text-green-700">{row.storeQty} ชิ้น</p>
-                                <p className="font-bold text-green-600">฿{fmt(row.storeAmount)}</p>
-                              </>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              );
-            })()}
+                {/* Table */}
+                <div className="flex-1 overflow-auto bg-gray-50">
 
-            {activeTab === 'sales' && (
-              <table className="w-full text-sm">
-                <thead className="bg-white sticky top-0 shadow-sm">
-                  <tr>
-                    <th className="table-header">วันที่</th>
-                    <th className="table-header">สาขา</th>
-                    <th className="table-header">สินค้า</th>
-                    <th className="table-header text-right">รายงานรวม</th>
-                    <th className="table-header text-right">บูธ (หัก)</th>
-                    <th className="table-header text-right">ยอดหน้าร้าน</th>
-                    <th className="table-header text-right">ราคา/หน่วย</th>
-                    <th className="table-header w-8"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {preview.deptStoreSales.length === 0 ? (
-                    <tr><td colSpan={8} className="p-8 text-center text-gray-400">ไม่มีข้อมูล</td></tr>
-                  ) : preview.deptStoreSales.map((row, i) => {
-                    const key = `s-${i}`;
-                    const expanded = expandedRows.has(key);
+                  {/* Tab 1: ภาพรวม — all valid sales (deptStoreSales + boothCovered) */}
+                  {activeTab === 'overview' && (() => {
+                    type OvType = 'store_matched' | 'store_nobooth' | 'booth_covered';
+                    const rows = [
+                      ...preview.deptStoreSales.map(r => ({ ...r, _t: (r.boothQty > 0 ? 'store_matched' : 'store_nobooth') as OvType })),
+                      ...(preview.boothCovered ?? []).map(r => ({ ...r, _t: 'booth_covered' as OvType, unitPrice: 0 })),
+                    ].sort((a, b) => a.date.localeCompare(b.date) || a.branchName.localeCompare(b.branchName) || a.itemName.localeCompare(b.itemName));
+                    const badge = (t: OvType) =>
+                      t === 'store_matched' ? <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium">ร้าน+บูธ</span>
+                      : t === 'store_nobooth' ? <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium">ร้านเดียว</span>
+                      : <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">บูธครบ</span>;
                     return (
-                      <React.Fragment key={key}>
-                        <tr className="hover:bg-green-50/30 cursor-pointer" onClick={() => toggleRow(key)}>
-                          <td className="table-cell text-xs font-mono">{row.date}</td>
-                          <td className="table-cell">
-                            <p className="font-medium text-xs">{row.branchName}</p>
-                            <p className="text-[10px] text-gray-400">{row.branchCode}</p>
-                          </td>
-                          <td className="table-cell">
-                            <p className="font-medium text-xs truncate max-w-[160px]" title={row.itemName}>{row.itemName}</p>
-                            <p className="text-[10px] text-gray-400 font-mono">{row.itemSku} / {row.itemBarcode}</p>
-                          </td>
-                          <td className="table-cell text-right text-xs text-gray-500">
-                            <p>{row.consolidatedQty}</p>
-                            <p>฿{fmt(row.consolidatedAmount)}</p>
-                          </td>
-                          <td className="table-cell text-right text-xs text-blue-500">
-                            {row.boothQty > 0 ? (
-                              <>
-                                <p>-{row.boothQty}</p>
-                                <p>-฿{fmt(row.boothAmount)}</p>
-                              </>
-                            ) : <span className="text-gray-300">—</span>}
-                          </td>
-                          <td className="table-cell text-right text-xs">
-                            <p className="font-bold text-green-700">{row.storeQty} ชิ้น</p>
-                            <p className="font-bold text-green-600">฿{fmt(row.storeAmount)}</p>
-                          </td>
-                          <td className="table-cell text-right text-xs text-gray-500 font-mono">
-                            {row.unitPrice > 0 ? `฿${fmt(row.unitPrice)}` : '—'}
-                          </td>
-                          <td className="table-cell text-gray-400">
-                            {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                          </td>
-                        </tr>
-                        {expanded && (
-                          <tr className="bg-green-50/40">
-                            <td colSpan={8} className="px-4 py-2">
-                              <div className="grid grid-cols-3 gap-4 text-xs">
-                                <div className="bg-white rounded p-2 border border-gray-100">
-                                  <p className="text-gray-400 mb-1 font-medium">Consolidated Report</p>
-                                  <p>จำนวน: <span className="font-semibold">{row.consolidatedQty}</span></p>
-                                  <p>ยอด: <span className="font-semibold">฿{fmt(row.consolidatedAmount)}</span></p>
-                                </div>
-                                <div className="bg-blue-50 rounded p-2 border border-blue-100">
-                                  <p className="text-blue-500 mb-1 font-medium">หักยอดบูธ (POS)</p>
-                                  <p>จำนวน: <span className="font-semibold text-blue-600">-{row.boothQty}</span></p>
-                                  <p>ยอด: <span className="font-semibold text-blue-600">-฿{fmt(row.boothAmount)}</span></p>
-                                </div>
-                                <div className="bg-green-50 rounded p-2 border border-green-100">
-                                  <p className="text-green-600 mb-1 font-medium">ยอดขายหน้าร้าน</p>
-                                  <p>จำนวน: <span className="font-bold text-green-700">{row.storeQty}</span></p>
-                                  <p>ยอด: <span className="font-bold text-green-700">฿{fmt(row.storeAmount)}</span></p>
-                                </div>
-                              </div>
-                            </td>
+                      <table className="w-full text-sm">
+                        <thead className="bg-white sticky top-0 shadow-sm">
+                          <tr>
+                            <th className="table-header w-24">สถานะ</th>
+                            <th className="table-header">วันที่</th>
+                            <th className="table-header">สาขา</th>
+                            <th className="table-header">สินค้า (บาร์โค้ด)</th>
+                            <th className="table-header text-right">รายงานรวม</th>
+                            <th className="table-header text-right">บูธ POS</th>
+                            <th className="table-header text-right">ยอดหน้าร้าน</th>
                           </tr>
-                        )}
-                      </React.Fragment>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {rows.length === 0 ? (
+                            <tr><td colSpan={7} className="p-8 text-center text-gray-400">ไม่มีข้อมูล</td></tr>
+                          ) : rows.map((row, i) => {
+                            const isCovered = row._t === 'booth_covered';
+                            return (
+                              <tr key={i} className={isCovered ? 'bg-blue-50/30 hover:bg-blue-50/50' : 'hover:bg-gray-50/60'}>
+                                <td className="table-cell text-center">{badge(row._t)}</td>
+                                <td className="table-cell text-xs font-mono">{row.date}</td>
+                                <td className="table-cell text-xs">
+                                  <p className="font-medium">{row.branchName}</p>
+                                  <p className="text-gray-400 text-[10px]">{row.branchCode}</p>
+                                </td>
+                                <td className="table-cell text-xs">
+                                  <p className="font-medium truncate max-w-[160px]" title={row.itemName}>{row.itemName}</p>
+                                  <p className="text-gray-400 font-mono text-[10px]">{row.itemBarcode} / {row.itemSku}</p>
+                                </td>
+                                <td className="table-cell text-right text-xs text-gray-600">
+                                  <p className="font-medium">{row.consolidatedQty} ชิ้น</p>
+                                  <p>฿{fmt(row.consolidatedAmount)}</p>
+                                </td>
+                                <td className="table-cell text-right text-xs text-blue-500">
+                                  {row.boothQty > 0 ? (<><p className="font-medium">{row.boothQty} ชิ้น</p><p>฿{fmt(row.boothAmount)}</p></>) : <span className="text-gray-300">—</span>}
+                                </td>
+                                <td className="table-cell text-right text-xs">
+                                  {isCovered
+                                    ? <span className="text-blue-600 font-medium text-[10px]">บูธขายครบ ✓</span>
+                                    : <><p className="font-bold text-green-700">{row.storeQty} ชิ้น</p><p className="font-bold text-green-600">฿{fmt(row.storeAmount)}</p></>}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     );
-                  })}
-                </tbody>
-              </table>
-            )}
+                  })()}
 
-            {activeTab === 'booth' && (
-              <table className="w-full text-sm">
-                <thead className="bg-white sticky top-0 shadow-sm">
-                  <tr>
-                    <th className="table-header">วันที่</th>
-                    <th className="table-header">สาขา</th>
-                    <th className="table-header">สินค้า</th>
-                    <th className="table-header text-right">รายงานรวม</th>
-                    <th className="table-header text-right">บูธ POS</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {(preview.boothCovered ?? []).length === 0 ? (
-                    <tr><td colSpan={5} className="p-8 text-center text-gray-400">ไม่มีรายการ</td></tr>
-                  ) : (preview.boothCovered ?? []).map((row, i) => (
-                    <tr key={i} className="hover:bg-blue-50/20">
-                      <td className="table-cell text-xs font-mono">{row.date}</td>
-                      <td className="table-cell text-xs">
-                        <p className="font-medium">{row.branchName}</p>
-                        <p className="text-gray-400">{row.branchCode}</p>
-                      </td>
-                      <td className="table-cell text-xs">
-                        <p className="font-medium truncate max-w-[160px]">{row.itemName}</p>
-                        <p className="text-gray-400 font-mono">{row.itemBarcode}</p>
-                      </td>
-                      <td className="table-cell text-right text-xs text-gray-500">
-                        <p>{row.consolidatedQty}</p>
-                        <p>฿{fmt(row.consolidatedAmount)}</p>
-                      </td>
-                      <td className="table-cell text-right text-xs text-blue-600 font-medium">
-                        <p>{row.boothQty} ชิ้น ✓</p>
-                        <p>฿{fmt(row.boothAmount)}</p>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+                  {/* Tab 2: ไม่พบในรายงาน — booth bills with no matching report row */}
+                  {activeTab === 'booth_unmatched' && (
+                    <table className="w-full text-sm">
+                      <thead className="bg-white sticky top-0 shadow-sm">
+                        <tr>
+                          <th className="table-header">ประเภท</th>
+                          <th className="table-header">วันที่</th>
+                          <th className="table-header">รหัสสาขา</th>
+                          <th className="table-header">รหัสสินค้า (บาร์โค้ด)</th>
+                          <th className="table-header text-right">จำนวน</th>
+                          <th className="table-header text-right">ยอด</th>
+                          <th className="table-header">รายละเอียด</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {boothUnmatched.length === 0 ? (
+                          <tr><td colSpan={7} className="p-8 text-center text-gray-400">ไม่มีรายการ</td></tr>
+                        ) : boothUnmatched.map((row, i) => (
+                          <tr key={i} className="hover:bg-gray-50/60">
+                            <td className="table-cell">
+                              <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${ISSUE_COLOR[row.issue] ?? 'bg-gray-100 text-gray-600'}`}>
+                                {ISSUE_LABEL[row.issue] ?? row.issue}
+                              </span>
+                            </td>
+                            <td className="table-cell text-xs font-mono">{row.date || '—'}</td>
+                            <td className="table-cell text-xs font-mono">{row.rawBranch || '—'}</td>
+                            <td className="table-cell text-xs font-mono">{row.rawItem || '—'}</td>
+                            <td className="table-cell text-right text-xs">{row.qty}</td>
+                            <td className="table-cell text-right text-xs">฿{fmt(row.amount)}</td>
+                            <td className="table-cell text-xs text-gray-500 text-[11px]">{row.detail}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
 
-            {activeTab === 'review' && (
-              <table className="w-full text-sm">
-                <thead className="bg-white sticky top-0 shadow-sm">
-                  <tr>
-                    <th className="table-header">ปัญหา</th>
-                    <th className="table-header">วันที่</th>
-                    <th className="table-header">สาขา</th>
-                    <th className="table-header">สินค้า</th>
-                    <th className="table-header text-right">Consolidated</th>
-                    <th className="table-header text-right">บูธ</th>
-                    <th className="table-header text-right">คำนวณได้ (ติดลบ)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {preview.reviewNeeded.length === 0 ? (
-                    <tr><td colSpan={7} className="p-8 text-center text-gray-400">ไม่มีรายการ</td></tr>
-                  ) : preview.reviewNeeded.map((row, i) => (
-                    <tr key={i} className="bg-orange-50/30 hover:bg-orange-50/60">
-                      <td className="table-cell">
-                        <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${ISSUE_COLOR[row.issue] ?? 'bg-gray-100 text-gray-600'}`}>
-                          {ISSUE_LABEL[row.issue] ?? row.issue}
-                        </span>
-                      </td>
-                      <td className="table-cell text-xs font-mono">{row.date}</td>
-                      <td className="table-cell text-xs">
-                        <p className="font-medium">{row.branchName}</p>
-                        <p className="text-gray-400">{row.branchCode}</p>
-                      </td>
-                      <td className="table-cell text-xs">
-                        <p className="font-medium truncate max-w-[140px]">{row.itemName}</p>
-                        <p className="text-gray-400 font-mono">{row.itemBarcode}</p>
-                      </td>
-                      <td className="table-cell text-right text-xs">
-                        <p>{row.consolidatedQty}</p>
-                        <p>฿{fmt(row.consolidatedAmount)}</p>
-                      </td>
-                      <td className="table-cell text-right text-xs text-blue-600">
-                        <p>{row.boothQty}</p>
-                        <p>฿{fmt(row.boothAmount)}</p>
-                      </td>
-                      <td className="table-cell text-right text-xs text-red-600 font-bold">
-                        <p>{row.storeQty}</p>
-                        <p>฿{fmt(row.storeAmount)}</p>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+                  {/* Tab 3: ต้องตรวจสอบ — negative results + unknown branch/item/data errors */}
+                  {activeTab === 'review' && (
+                    <table className="w-full text-sm">
+                      <thead className="bg-white sticky top-0 shadow-sm">
+                        <tr>
+                          <th className="table-header">ปัญหา</th>
+                          <th className="table-header">วันที่</th>
+                          <th className="table-header">สาขา / รหัส</th>
+                          <th className="table-header">สินค้า / รหัส</th>
+                          <th className="table-header text-right">รายงานรวม</th>
+                          <th className="table-header text-right">บูธ POS</th>
+                          <th className="table-header text-right">ผลคำนวณ</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {reviewAll.length === 0 ? (
+                          <tr><td colSpan={7} className="p-8 text-center text-gray-400">ไม่มีรายการ</td></tr>
+                        ) : reviewAll.map((row: any, i) => {
+                          const isNeg = 'storeQty' in row;
+                          return (
+                            <tr key={i} className="bg-orange-50/30 hover:bg-orange-50/60">
+                              <td className="table-cell">
+                                <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${ISSUE_COLOR[row.issue] ?? 'bg-gray-100 text-gray-600'}`}>
+                                  {ISSUE_LABEL[row.issue] ?? row.issue}
+                                </span>
+                              </td>
+                              <td className="table-cell text-xs font-mono">{row.date || '—'}</td>
+                              <td className="table-cell text-xs">
+                                {isNeg ? <><p className="font-medium">{row.branchName}</p><p className="text-gray-400 text-[10px]">{row.branchCode}</p></> : <span className="font-mono">{row.rawBranch || '—'}</span>}
+                              </td>
+                              <td className="table-cell text-xs">
+                                {isNeg ? <><p className="font-medium truncate max-w-[140px]">{row.itemName}</p><p className="text-gray-400 font-mono text-[10px]">{row.itemBarcode}</p></> : <span className="font-mono">{row.rawItem || '—'}</span>}
+                              </td>
+                              <td className="table-cell text-right text-xs text-gray-600">
+                                {isNeg ? <><p>{row.consolidatedQty}</p><p>฿{fmt(row.consolidatedAmount)}</p></> : <><p>{row.qty}</p><p>฿{fmt(row.amount)}</p></>}
+                              </td>
+                              <td className="table-cell text-right text-xs text-blue-600">
+                                {isNeg ? <><p>{row.boothQty}</p><p>฿{fmt(row.boothAmount)}</p></> : <span className="text-gray-300">—</span>}
+                              </td>
+                              <td className="table-cell text-right text-xs font-bold text-red-600">
+                                {isNeg ? <><p>{row.storeQty}</p><p>฿{fmt(row.storeAmount)}</p></> : <span className="text-gray-400 text-xs font-normal">{row.detail}</span>}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
 
-            {activeTab === 'errors' && (
-              <table className="w-full text-sm">
-                <thead className="bg-white sticky top-0 shadow-sm">
-                  <tr>
-                    <th className="table-header">ประเภทข้อผิดพลาด</th>
-                    <th className="table-header">วันที่</th>
-                    <th className="table-header">รหัสสาขา</th>
-                    <th className="table-header">รหัสสินค้า</th>
-                    <th className="table-header text-right">จำนวน</th>
-                    <th className="table-header text-right">ยอด</th>
-                    <th className="table-header">รายละเอียด</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {preview.errorLogs.length === 0 ? (
-                    <tr><td colSpan={7} className="p-8 text-center text-gray-400">ไม่มีข้อผิดพลาด</td></tr>
-                  ) : preview.errorLogs.map((row, i) => (
-                    <tr key={i} className="bg-red-50/20 hover:bg-red-50/40">
-                      <td className="table-cell">
-                        <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${ISSUE_COLOR[row.issue] ?? 'bg-gray-100 text-gray-600'}`}>
-                          {ISSUE_LABEL[row.issue] ?? row.issue}
-                        </span>
-                      </td>
-                      <td className="table-cell text-xs font-mono">{row.date || '—'}</td>
-                      <td className="table-cell text-xs font-mono">{row.rawBranch || '—'}</td>
-                      <td className="table-cell text-xs font-mono">{row.rawItem || '—'}</td>
-                      <td className="table-cell text-right text-xs">{row.qty}</td>
-                      <td className="table-cell text-right text-xs">฿{fmt(row.amount)}</td>
-                      <td className="table-cell text-xs text-gray-500">{row.detail}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
+                  {/* Tab 4: ข้อมูลหักลบ — report rows with qty ≤ 0 or price = 0 */}
+                  {activeTab === 'deduction' && (
+                    <table className="w-full text-sm">
+                      <thead className="bg-white sticky top-0 shadow-sm">
+                        <tr>
+                          <th className="table-header">เหตุผล</th>
+                          <th className="table-header">แถว</th>
+                          <th className="table-header">วันที่</th>
+                          <th className="table-header">รหัสสาขา</th>
+                          <th className="table-header">รหัสสินค้า</th>
+                          <th className="table-header text-right">จำนวน</th>
+                          <th className="table-header text-right">ราคา/หน่วย</th>
+                          <th className="table-header text-right">ยอด</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {(preview.deductionRows ?? []).length === 0 ? (
+                          <tr><td colSpan={8} className="p-8 text-center text-gray-400">ไม่มีรายการ</td></tr>
+                        ) : (preview.deductionRows ?? []).map((row, i) => (
+                          <tr key={i} className="bg-purple-50/20 hover:bg-purple-50/40">
+                            <td className="table-cell">
+                              <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
+                                {DEDUCTION_LABEL[row.reason] ?? row.reason}
+                              </span>
+                            </td>
+                            <td className="table-cell text-xs text-gray-400 font-mono">{row.rowNum}</td>
+                            <td className="table-cell text-xs font-mono">{row.date}</td>
+                            <td className="table-cell text-xs font-mono">{row.rawBranch}</td>
+                            <td className="table-cell text-xs font-mono">{row.rawItem}</td>
+                            <td className="table-cell text-right text-xs font-medium text-red-600">{row.qty}</td>
+                            <td className="table-cell text-right text-xs text-gray-500">฿{fmt(row.price)}</td>
+                            <td className="table-cell text-right text-xs text-gray-500">฿{fmt(row.amount)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+
+                </div>
+              </>
+            );
+          })()}
 
           {/* Footer */}
           <div className="bg-white border-t px-5 py-3 flex items-center justify-between shrink-0">

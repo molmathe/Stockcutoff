@@ -343,7 +343,7 @@ router.put('/:id/cancel', authenticate, async (req: AuthRequest, res: Response) 
   }
 });
 
-// DELETE /bills/:id — hard delete a SUBMITTED bill (SUPER_ADMIN only)
+// DELETE /bills/:id — hard delete a SUBMITTED or CANCELLED bill (SUPER_ADMIN only)
 router.delete('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     if (req.user!.role !== 'SUPER_ADMIN') {
@@ -355,8 +355,8 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res: Response) => {
       include: { items: true },
     });
     if (!bill) return res.status(404).json({ error: 'ไม่พบบิล' });
-    if (bill.status !== 'SUBMITTED') {
-      return res.status(400).json({ error: 'ลบได้เฉพาะบิลที่ส่งแล้ว (SUBMITTED) เท่านั้น' });
+    if (bill.status !== 'SUBMITTED' && bill.status !== 'CANCELLED') {
+      return res.status(400).json({ error: 'ลบได้เฉพาะบิลที่ส่งแล้ว (SUBMITTED) หรือยกเลิก (CANCELLED) เท่านั้น' });
     }
 
     await prisma.bill.delete({ where: { id: req.params.id } });
