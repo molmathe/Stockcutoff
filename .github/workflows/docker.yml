@@ -136,12 +136,20 @@ jobs:
             printf '\nIMAGE_TAG=%s\n' "$IMAGE_TAG" >> .env
           fi
 
-          docker compose pull postgres backend frontend nginx tunnel
-          docker compose up -d --remove-orphans postgres backend frontend nginx tunnel
+          docker compose pull
+          docker compose up -d --remove-orphans
 
           app_port="$(awk -F= '/^PORT=/{print $2}' .env | tail -n 1)"
           app_port="${app_port:-8082}"
           curl --fail --silent --show-error "http://127.0.0.1:${app_port}/health" >/dev/null
+
+          portainer_port="$(awk -F= '/^PORTAINER_PORT=/{print $2}' .env | tail -n 1)"
+          portainer_port="${portainer_port:-9000}"
+          curl --fail --silent --show-error "http://127.0.0.1:${portainer_port}" >/dev/null
+
+          kuma_port="$(awk -F= '/^UPTIME_KUMA_PORT=/{print $2}' .env | tail -n 1)"
+          kuma_port="${kuma_port:-3002}"
+          curl --fail --silent --show-error "http://127.0.0.1:${kuma_port}" >/dev/null
 
   create_git_tag:
     runs-on: ubuntu-latest
