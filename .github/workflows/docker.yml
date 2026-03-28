@@ -2,10 +2,10 @@ name: Build & Push Docker Images
 
 on:
   push:
-    branches: [main]
+    branches: [main, UAT]
     tags: ['v*']
   pull_request:
-    branches: [main]
+    branches: [main, UAT]
 
 env:
   REGISTRY: ghcr.io
