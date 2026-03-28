@@ -122,6 +122,7 @@ model Bill {
   saleDate    DateTime?                      // original sale date for imported records
   subtotal    Decimal    @db.Decimal(10, 2) @default(0)
   discount    Decimal    @db.Decimal(10, 2) @default(0)
+  discountPct Decimal    @db.Decimal(5, 2)  @default(0)
   total       Decimal    @db.Decimal(10, 2) @default(0)
   notes       String?
   createdAt   DateTime   @default(now())
@@ -196,4 +197,14 @@ model UnresolvedSale {
 
   @@index([status])
   @@index([userId])
+}
+
+model Promotion {
+  id        String   @id @default(cuid())
+  name      String
+  buyQty    Int
+  freeQty   Int
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import {
   ShoppingCart, FileText, LayoutDashboard, Package,
   Building2, Users, BarChart3, LogOut, Menu, X, Tag,
-  FileSpreadsheet, FileUp, FileWarning, ClipboardList, GitMerge, ShieldBan, Database
+  FileSpreadsheet, FileUp, FileWarning, ClipboardList, GitMerge, ShieldBan, Database, Percent
 } from 'lucide-react';
 
 export default function Layout() {
@@ -24,6 +24,7 @@ export default function Layout() {
         { to: '/admin/blocked-barcodes', icon: <ShieldBan size={16} />, label: 'บาร์โค้ดต้องห้าม', indent: true },
       ] : []),
       { to: '/admin/categories', icon: <Tag size={18} />, label: 'จัดการหมวดหมู่' },
+      { to: '/admin/promotions', icon: <Percent size={18} />, label: 'จัดการโปรโมชั่น' },
       { to: '/admin/branches', icon: <Building2 size={18} />, label: 'จัดการสาขา' },
       { to: '/admin/users', icon: <Users size={18} />, label: 'จัดการผู้ใช้' },
       { to: '/admin/reports', icon: <BarChart3 size={18} />, label: 'รายงานยอดขาย' },

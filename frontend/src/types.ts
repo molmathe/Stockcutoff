@@ -70,6 +70,7 @@ export interface Bill {
   saleDate: string | null;
   subtotal: string;
   discount: string;
+  discountPct: string;
   total: string;
   notes: string | null;
   createdAt: string;

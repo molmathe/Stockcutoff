@@ -90,10 +90,6 @@ export default function Bills() {
     onError: (e: any) => toast.error(e?.response?.data?.error || 'แก้ไขบิลไม่สำเร็จ'),
   });
 
-  const cancelBill = (id: string) => {
-    if (!confirm('ยืนยันการยกเลิกบิลนี้?')) return;
-    cancelMutation.mutate(id);
-  };
 
   const openEditModal = (bill: Bill) => {
     setEditState({
@@ -258,8 +254,13 @@ export default function Bills() {
                     <p className="text-sm font-bold">฿{Number(bill.total).toLocaleString('th-TH', { minimumFractionDigits: 2 })}</p>
                     <p className="text-xs text-gray-400">{bill.items.length} รายการ</p>
                   </div>
-                  {bill.status === 'OPEN' && (
-                    <button onClick={(e) => { e.stopPropagation(); cancelBill(bill.id); }}
+                  {(bill.status === 'OPEN' || (isSuperAdmin && bill.status === 'SUBMITTED')) && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!confirm(`ยืนยันการยกเลิกบิล ${bill.billNumber}?\n\nบิลจะถูกบันทึกเป็น "ยกเลิก" และไม่สามารถย้อนกลับได้`)) return;
+                        cancelMutation.mutate(bill.id);
+                      }}
                       className="text-red-400 hover:text-red-600 shrink-0" title="ยกเลิกบิล">
                       <X size={16} />
                     </button>
