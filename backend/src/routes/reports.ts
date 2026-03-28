@@ -132,19 +132,23 @@ async function remapImportRows(inputRows: any[], maxRows = 10000) {
       ) || null;
     }
 
+    const rowDiscount = Math.max(0, Number(r.discount) || 0);
+    const rowNet = r.price * r.qty - rowDiscount;
+
     const errors: string[] = [];
     if (!r.saleDate) errors.push('วันที่ไม่ถูกต้อง');
     if (r.qty <= 0) errors.push('จำนวนต้องมากว่า 0');
     if (r.price < 0) errors.push('ราคาไม่ถูกต้อง');
+    if (rowNet < 0) errors.push('ส่วนลดมากกว่าราคาขาย');
     if (!branch && r.rawBranch) errors.push(`ไม่พบสาขา: ${r.rawBranch}`);
     if (!item && r.rawItem) errors.push(`ไม่พบสินค้า: ${r.rawItem}`);
 
-    const isMatched = !!(r.saleDate && branch && item && r.qty > 0 && r.price >= 0 && errors.length === 0);
+    const isMatched = !!(r.saleDate && branch && item && r.qty > 0 && r.price >= 0 && rowNet >= 0 && errors.length === 0);
 
     if (isMatched) {
       matched++;
       totalQty += r.qty;
-      totalRevenue += r.qty * r.price;
+      totalRevenue += rowNet; // Net revenue after discount
     }
 
     rows.push({
@@ -161,6 +165,7 @@ async function remapImportRows(inputRows: any[], maxRows = 10000) {
       itemBarcode: item?.barcode || '',
       qty: r.qty,
       price: r.price,
+      discount: rowDiscount,
       status: isMatched ? 'matched' : errors.length ? 'invalid' : (!branch ? 'no_branch' : 'no_item'),
       errors,
     });
@@ -751,6 +756,7 @@ router.post('/import/submit', authenticate, requireSuperAdmin, async (req: AuthR
         itemId: string;
         qty: number;
         price: number;
+        discount?: number; // Total row discount (may be absent for drafts without discount data)
       }>;
       platform: ImportPlatform;
       unmatchedRows?: any[];
@@ -826,11 +832,32 @@ router.post('/import/submit', authenticate, requireSuperAdmin, async (req: AuthR
       groups.get(key)!.items.push(row);
     }
 
+    const round2 = (n: number) => Math.round(n * 100) / 100;
     let createdCount = 0;
     const now = new Date();
 
     for (const [, group] of groups) {
-      const subtotal = group.items.reduce((s, r) => s + r.price * r.qty, 0);
+      // Compute per-item net subtotals (gross - item discount)
+      const billItems = group.items.map((r) => {
+        const rowDiscount = round2(Math.max(0, Number(r.discount) || 0));
+        const rowGross = round2(r.price * r.qty);
+        const rowNet = round2(rowGross - rowDiscount);
+        return { itemId: r.itemId, quantity: r.qty, price: r.price, discount: rowDiscount, subtotal: rowNet };
+      });
+
+      const billGross = round2(billItems.reduce((s, bi) => s + bi.price * bi.quantity, 0));
+      const billDiscount = round2(billItems.reduce((s, bi) => s + bi.discount, 0));
+      const billNet = round2(billItems.reduce((s, bi) => s + bi.subtotal, 0));
+
+      // Validation: subtotal - discount must equal net total
+      const expectedNet = round2(billGross - billDiscount);
+      if (Math.abs(expectedNet - billNet) > 0.01) {
+        console.warn(`[IMPORT VALIDATION] Discrepancy detected for ${group.branchId} on ${group.saleDate}: gross=฿${billGross}, discount=฿${billDiscount}, computed net=฿${billNet}, expected net=฿${expectedNet}`);
+      }
+      if (billDiscount > 0) {
+        console.log(`[IMPORT] Discount applied: gross=฿${billGross}, discount=฿${billDiscount}, net=฿${billNet} (branch=${group.branchId}, date=${group.saleDate})`);
+      }
+
       await prisma.bill.create({
         data: {
           billNumber: generateImportBillNumber(group.saleDate),
@@ -840,19 +867,13 @@ router.post('/import/submit', authenticate, requireSuperAdmin, async (req: AuthR
           source: 'IMPORT',
           importPlatform: platform || null,
           saleDate: group.saleDate,
-          subtotal,
-          discount: 0,
-          total: subtotal,
+          subtotal: billNet,   // Net (after discounts) — consistent with how POS bills store subtotal
+          discount: 0,         // No bill-level discount for imports
+          total: billNet,
           submittedAt: now,
           notes: fileName ? `นำเข้าจากไฟล์: ${fileName}` : 'นำเข้าจากไฟล์ Excel',
           items: {
-            create: group.items.map((r) => ({
-              itemId: r.itemId,
-              quantity: r.qty,
-              price: r.price,
-              discount: 0,
-              subtotal: r.price * r.qty,
-            })),
+            create: billItems,
           },
         },
       });

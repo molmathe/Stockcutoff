@@ -114,7 +114,7 @@ router.get('/today-summary', authenticate, async (req: AuthRequest, res: Respons
 // POST /bills — create new bill
 router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const { branchId, items, notes, discount = 0 } = req.body;
+    const { branchId, items, notes, discount = 0, discountPct = 0 } = req.body;
 
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'กรุณาเพิ่มสินค้าอย่างน้อย 1 รายการ' });
@@ -128,19 +128,20 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
     const billItems = (items as any[]).map((it, idx) => {
       const qty = Number(it.quantity);
       const price = Number(it.price);
-      const itemDiscount = Number(it.discount) || 0;
       if (!Number.isFinite(qty) || qty <= 0 || !Number.isInteger(qty)) {
         throw Object.assign(new Error(`รายการที่ ${idx + 1}: จำนวนต้องเป็นจำนวนเต็มบวก`), { status: 400 });
       }
       if (!Number.isFinite(price) || price < 0) {
         throw Object.assign(new Error(`รายการที่ ${idx + 1}: ราคาไม่ถูกต้อง`), { status: 400 });
       }
+      const itemDiscount = Math.min(Math.max(0, round2(Number(it.discount) || 0)), round2(price * qty));
       const sub = round2(price * qty - itemDiscount);
       subtotal = round2(subtotal + sub);
       return { itemId: it.itemId, quantity: qty, price, discount: itemDiscount, subtotal: sub };
     });
 
     const totalDiscount = Math.max(0, round2(Number(discount)));
+    const totalDiscountPct = Math.min(99, Math.max(0, round2(Number(discountPct))));
     const total = Math.max(0, round2(subtotal - totalDiscount));
 
     const bill = await prisma.bill.create({
@@ -150,6 +151,7 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
         userId: req.user!.id,
         subtotal,
         discount: totalDiscount,
+        discountPct: totalDiscountPct,
         total,
         notes,
         items: { create: billItems },
@@ -195,7 +197,7 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ error: 'ไม่มีสิทธิ์แก้ไขบิลสาขาอื่น' });
     }
 
-    const { items, notes, discount = 0 } = req.body;
+    const { items, notes, discount = 0, discountPct = 0 } = req.body;
 
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'กรุณาเพิ่มสินค้าอย่างน้อย 1 รายการ' });
@@ -205,18 +207,19 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     const billItems = (items as any[]).map((it, idx) => {
       const qty = Number(it.quantity);
       const price = Number(it.price);
-      const itemDiscount = Number(it.discount) || 0;
       if (!Number.isFinite(qty) || qty <= 0 || !Number.isInteger(qty)) {
         throw Object.assign(new Error(`รายการที่ ${idx + 1}: จำนวนต้องเป็นจำนวนเต็มบวก`), { status: 400 });
       }
       if (!Number.isFinite(price) || price < 0) {
         throw Object.assign(new Error(`รายการที่ ${idx + 1}: ราคาไม่ถูกต้อง`), { status: 400 });
       }
+      const itemDiscount = Math.min(Math.max(0, round2(Number(it.discount) || 0)), round2(price * qty));
       const sub = round2(price * qty - itemDiscount);
       subtotal = round2(subtotal + sub);
       return { itemId: it.itemId, quantity: qty, price, discount: itemDiscount, subtotal: sub };
     });
     const totalDiscount = Math.max(0, round2(Number(discount)));
+    const totalDiscountPct = Math.min(99, Math.max(0, round2(Number(discountPct))));
     const total = Math.max(0, round2(subtotal - totalDiscount));
 
     // Atomic: delete old items and recreate within one transaction to prevent data loss
@@ -227,6 +230,7 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
         data: {
           subtotal,
           discount: totalDiscount,
+          discountPct: totalDiscountPct,
           total,
           notes,
           items: { create: billItems },
@@ -309,12 +313,19 @@ router.post('/submit-day', authenticate, async (req: AuthRequest, res: Response)
   }
 });
 
-// PUT /bills/:id/cancel
+// PUT /bills/:id/cancel — soft-delete (set CANCELLED); SUPER_ADMIN can void SUBMITTED too
 router.put('/:id/cancel', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const bill = await prisma.bill.findUnique({ where: { id: req.params.id } });
     if (!bill) return res.status(404).json({ error: 'ไม่พบบิล' });
-    if (bill.status !== 'OPEN') return res.status(400).json({ error: 'ยกเลิกได้เฉพาะบิลที่ยังเปิดอยู่' });
+    if (bill.status === 'CANCELLED') return res.status(400).json({ error: 'บิลนี้ถูกยกเลิกแล้ว' });
+
+    const isSuperAdmin = req.user!.role === 'SUPER_ADMIN';
+
+    // Only SUPER_ADMIN can void SUBMITTED bills; others can only void OPEN bills
+    if (!isSuperAdmin && bill.status !== 'OPEN') {
+      return res.status(403).json({ error: 'ยกเลิกได้เฉพาะบิลที่ยังเปิดอยู่ (SUPER_ADMIN เท่านั้นที่ยกเลิกบิลที่ส่งแล้วได้)' });
+    }
 
     // Ownership / scope checks
     if (req.user!.role === 'CASHIER' && bill.userId !== req.user!.id) {
@@ -325,8 +336,39 @@ router.put('/:id/cancel', authenticate, async (req: AuthRequest, res: Response) 
     }
 
     const updated = await prisma.bill.update({ where: { id: req.params.id }, data: { status: 'CANCELLED' } });
-    logAudit({ userId: req.user!.id, action: 'CANCEL_BILL', entity: 'Bill', entityId: bill.id, detail: { billNumber: bill.billNumber, total: Number(bill.total), status: bill.status }, ip: getClientIp(req) });
+    logAudit({ userId: req.user!.id, action: 'CANCEL_BILL', entity: 'Bill', entityId: bill.id, detail: { billNumber: bill.billNumber, total: Number(bill.total), previousStatus: bill.status }, ip: getClientIp(req) });
     res.json(updated);
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// DELETE /bills/:id — hard delete a SUBMITTED bill (SUPER_ADMIN only)
+router.delete('/:id', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    if (req.user!.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ error: 'เฉพาะ SUPER_ADMIN เท่านั้นที่ลบบิลได้' });
+    }
+
+    const bill = await prisma.bill.findUnique({
+      where: { id: req.params.id },
+      include: { items: true },
+    });
+    if (!bill) return res.status(404).json({ error: 'ไม่พบบิล' });
+    if (bill.status !== 'SUBMITTED') {
+      return res.status(400).json({ error: 'ลบได้เฉพาะบิลที่ส่งแล้ว (SUBMITTED) เท่านั้น' });
+    }
+
+    await prisma.bill.delete({ where: { id: req.params.id } });
+    logAudit({
+      userId: req.user!.id,
+      action: 'DELETE_BILL',
+      entity: 'Bill',
+      entityId: bill.id,
+      detail: { billNumber: bill.billNumber, total: Number(bill.total), itemCount: bill.items.length },
+      ip: getClientIp(req),
+    });
+    res.json({ message: `ลบบิล ${bill.billNumber} เรียบร้อยแล้ว` });
   } catch {
     res.status(500).json({ error: 'Server error' });
   }

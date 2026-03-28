@@ -20,6 +20,15 @@ interface CartItem {
   price: number;
   discount: number;
   discountStr: string;
+  promoDiscount: number;
+}
+
+interface Promotion {
+  id: string;
+  name: string;
+  buyQty: number;
+  freeQty: number;
+  active: boolean;
 }
 
 const numericKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -48,6 +57,8 @@ export default function POS() {
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
   const [closingDay, setClosingDay] = useState(false);
+  const [promotions, setPromotions] = useState<Promotion[]>([]);
+  const [selectedPromoId, setSelectedPromoId] = useState<string>('');
 
   // Suggestion state
   const [suggestions, setSuggestions] = useState<Item[]>([]);
@@ -71,6 +82,7 @@ export default function POS() {
     if (isAdmin) {
       client.get('/branches').then((r) => setBranches(r.data)).catch(() => {});
     }
+    client.get('/promotions', { params: { active: 'true' } }).then((r) => setPromotions(r.data)).catch(() => {});
     loadSummary();
     inputRef.current?.focus();
   }, []);
@@ -136,11 +148,17 @@ export default function POS() {
   }, []);
 
   const addToCart = (item: Item) => {
+    const promo = promotions.find((p) => p.id === selectedPromoId);
     setCartItems((prev) => {
       const existing = prev.find((c) => c.itemId === item.id);
       if (existing) {
-        return prev.map((c) => c.itemId === item.id ? { ...c, quantity: c.quantity + 1 } : c);
+        const newQty = existing.quantity + 1;
+        return prev.map((c) => {
+          if (c.itemId !== item.id) return c;
+          return { ...c, quantity: newQty, promoDiscount: calcPromoDiscount(c.price, newQty, promo) };
+        });
       }
+      const price = parseFloat(String(item.defaultPrice));
       return [...prev, {
         itemId: item.id,
         name: item.name,
@@ -148,9 +166,10 @@ export default function POS() {
         barcode: item.barcode,
         imageUrl: item.imageUrl,
         quantity: 1,
-        price: parseFloat(String(item.defaultPrice)),
+        price,
         discount: 0,
         discountStr: '0',
+        promoDiscount: calcPromoDiscount(price, 1, promo),
       }];
     });
     toast.success(`เพิ่ม: ${item.name}`, { duration: 1500, icon: '✅' });
@@ -211,7 +230,10 @@ export default function POS() {
 
   const updateQty = (itemId: string, qty: number) => {
     if (qty <= 0) { removeItem(itemId); return; }
-    setCartItems((prev) => prev.map((c) => c.itemId === itemId ? { ...c, quantity: qty } : c));
+    const promo = promotions.find((p) => p.id === selectedPromoId);
+    setCartItems((prev) => prev.map((c) =>
+      c.itemId !== itemId ? c : { ...c, quantity: qty, promoDiscount: calcPromoDiscount(c.price, qty, promo) }
+    ));
   };
 
   const updatePrice = (itemId: string, priceStr: string) => {
@@ -225,7 +247,22 @@ export default function POS() {
     setCartItems((prev) => prev.map((c) => c.itemId === itemId ? { ...c, discount, discountStr: clean } : c));
   };
 
-  const removeItem = (itemId: string) => setCartItems((prev) => prev.filter((c) => c.itemId !== itemId));
+  const calcPromoDiscount = (price: number, qty: number, promo: Promotion | undefined): number => {
+    if (!promo || (promo.buyQty + promo.freeQty) === 0) return 0;
+    const freeUnits = Math.floor(qty / (promo.buyQty + promo.freeQty)) * promo.freeQty;
+    return Math.round(freeUnits * price * 100) / 100;
+  };
+
+  const applyPromo = (promoId: string) => {
+    const promo = promotions.find((p) => p.id === promoId);
+    setSelectedPromoId(promoId);
+    setCartItems((prev) => prev.map((c) => ({
+      ...c,
+      promoDiscount: calcPromoDiscount(c.price, c.quantity, promo),
+    })));
+  };
+
+const removeItem = (itemId: string) => setCartItems((prev) => prev.filter((c) => c.itemId !== itemId));
 
   const clearCart = () => {
     setCartItems([]);
@@ -233,14 +270,16 @@ export default function POS() {
     setNotes('');
     setEditingBillId(null);
     setLastSaved(null);
+    setSelectedPromoId('');
   };
 
   const grossSubtotal = Math.round(cartItems.reduce((s, c) => s + c.price * c.quantity, 0) * 100) / 100;
-  const totalItemDiscounts = Math.round(cartItems.reduce((s, c) => s + c.discount, 0) * 100) / 100;
+  const totalItemDiscounts = Math.round(cartItems.reduce((s, c) => s + c.discount + c.promoDiscount, 0) * 100) / 100;
   const subtotal = Math.round((grossSubtotal - totalItemDiscounts) * 100) / 100;
   const billDiscountAmt = Math.round(subtotal * billDiscountPct) / 100;
   const totalDiscount = totalItemDiscounts + billDiscountAmt;
   const total = Math.max(0, subtotal - billDiscountAmt);
+  const selectedPromo = promotions.find((p) => p.id === selectedPromoId);
 
   const saveBill = async () => {
     if (cartItems.length === 0) { toast.error('ตะกร้าว่างเปล่า'); return; }
@@ -251,12 +290,13 @@ export default function POS() {
       const payload = {
         branchId,
         discount: billDiscountAmt,
+        discountPct: billDiscountPct,
         notes,
         items: cartItems.map((c) => ({
           itemId: c.itemId,
           quantity: c.quantity,
           price: c.price,
-          discount: c.discount,
+          discount: Math.round((c.discount + c.promoDiscount) * 100) / 100,
         })),
       };
       let billNumber: string;
@@ -293,11 +333,11 @@ export default function POS() {
       price: parseFloat(String(bi.price)),
       discount: parseFloat(String(bi.discount || 0)),
       discountStr: String(bi.discount || '0'),
+      promoDiscount: 0,
     }));
-    const billSub = billItems.reduce((s, c) => s + c.price * c.quantity - c.discount, 0);
-    const storedDiscount = parseFloat(String(bill.discount || 0));
-    const pct = billSub > 0 && storedDiscount > 0 ? Math.round(storedDiscount / billSub * 100) : 0;
-    setBillDiscountPctStr(pct > 0 ? String(pct) : '');
+    // Restore discount % directly from the stored discountPct field (avoids recomputation bugs)
+    const storedPct = parseFloat(String(bill.discountPct || 0));
+    setBillDiscountPctStr(storedPct > 0 ? String(storedPct) : '');
     setCartItems(billItems);
     setShowSummary(false);
     toast(`แก้ไขบิล ${bill.billNumber}`, { icon: '✏️' });
@@ -487,6 +527,23 @@ export default function POS() {
         {/* Bill options */}
         <div className="card">
           <h3 className="font-medium text-gray-700 mb-2">ตัวเลือกบิล</h3>
+          {promotions.length > 0 && (
+            <div className="mb-3">
+              <label className="label">โปรโมชั่น</label>
+              <select
+                value={selectedPromoId}
+                onChange={(e) => applyPromo(e.target.value)}
+                className="input"
+              >
+                <option value="">— ไม่มีโปรโมชั่น —</option>
+                {promotions.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} (ซื้อ {p.buyQty} แถม {p.freeQty})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label">ส่วนลดบิล (%)</label>
@@ -596,12 +653,28 @@ export default function POS() {
                             {bill.items.length} รายการ · ฿{fmt(parseFloat(String(bill.total)))}
                           </p>
                         </div>
-                        <button
-                          onClick={() => loadBillForEdit(bill)}
-                          className="text-xs bg-orange-100 text-orange-700 hover:bg-orange-200 rounded px-2.5 py-1 flex items-center gap-1 transition-colors"
-                        >
-                          <Pencil size={12} /> แก้ไข
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => loadBillForEdit(bill)}
+                            className="text-xs bg-orange-100 text-orange-700 hover:bg-orange-200 rounded px-2.5 py-1 flex items-center gap-1 transition-colors"
+                          >
+                            <Pencil size={12} /> แก้ไข
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (!confirm(`ยืนยันการยกเลิกบิล ${bill.billNumber}?\n\nการกระทำนี้ไม่สามารถย้อนกลับได้`)) return;
+                              client.put(`/bills/${bill.id}/cancel`).then(() => {
+                                if (editingBillId === bill.id) clearCart();
+                                loadSummary();
+                                toast.success(`ยกเลิกบิล ${bill.billNumber} เรียบร้อย`);
+                              }).catch(() => toast.error('ยกเลิกบิลไม่สำเร็จ'));
+                            }}
+                            className="text-xs bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded px-2 py-1 flex items-center gap-1 transition-colors"
+                            title="ยกเลิกบิล"
+                          >
+                            <X size={11} /> ยกเลิก
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -637,12 +710,17 @@ export default function POS() {
             </div>
           ) : (
             <div className="space-y-2">
-              {cartItems.map((item) => (
+              {cartItems.map((item) => {
+                const lineSubtotal = Math.round((item.price * item.quantity - item.discount - item.promoDiscount) * 100) / 100;
+                const effectiveLineTotal = Math.round(lineSubtotal * (1 - billDiscountPct / 100) * 100) / 100;
+                const effectivePricePerUnit = item.quantity > 0 ? Math.round(effectiveLineTotal / item.quantity * 100) / 100 : 0;
+                const isItemFree = item.price === 0 || effectiveLineTotal <= 0.001;
+                return (
                 <div
                   key={item.itemId}
-                  className="p-2.5 bg-gray-50 rounded-lg border border-gray-100 space-y-2"
+                  className={`p-2.5 rounded-lg border space-y-2 ${isItemFree ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-100'}`}
                 >
-                  {/* Row 1: Image + Name/SKU + Delete */}
+                  {/* Row 1: Image + Name/SKU + badges + Delete */}
                   <div className="flex items-center gap-2">
                     {item.imageUrl ? (
                       <img src={item.imageUrl} alt={item.name} className="w-9 h-9 object-cover rounded-lg shrink-0" />
@@ -652,7 +730,19 @@ export default function POS() {
                       </div>
                     )}
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{item.name}</p>
+                      <p className="text-sm font-medium truncate flex items-center gap-1.5">
+                        {item.name}
+                        {isItemFree && (
+                          <span className="inline-flex text-[10px] font-bold bg-green-500 text-white px-1.5 py-0.5 rounded-full shrink-0">
+                            Free Gift
+                          </span>
+                        )}
+                        {!isItemFree && item.promoDiscount > 0 && selectedPromo && (
+                          <span className="inline-flex text-[10px] font-bold bg-purple-500 text-white px-1.5 py-0.5 rounded-full shrink-0">
+                            PROMO
+                          </span>
+                        )}
+                      </p>
                       <p className="text-[10px] text-gray-400 leading-tight truncate">{item.sku} / {item.barcode}</p>
                     </div>
                     <button
@@ -706,6 +796,9 @@ export default function POS() {
                         className="w-full text-right text-sm border border-gray-300 rounded px-2 py-1"
                         title="ราคา"
                       />
+                      {billDiscountPct > 0 && item.price > 0 && (
+                        <p className="text-[10px] text-blue-600 text-right mt-0.5">= ฿{fmt(effectivePricePerUnit)}</p>
+                      )}
                     </div>
 
                     {/* Discount */}
@@ -725,50 +818,40 @@ export default function POS() {
                     {/* Line total */}
                     <div className="shrink-0 text-right">
                       <p className="text-[10px] text-gray-400 mb-1">รวม</p>
-                      <p className="text-sm font-bold text-gray-900 py-1">
-                        ฿{fmt(item.price * item.quantity - item.discount)}
-                      </p>
+                      {isItemFree ? (
+                        <p className="text-sm font-bold text-green-600 py-1">฿0</p>
+                      ) : (
+                        <p className="text-sm font-bold text-gray-900 py-1">฿{fmt(effectiveLineTotal)}</p>
+                      )}
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
           {/* Totals */}
           <div className="border-t pt-3 mt-3 space-y-1">
-            {totalDiscount > 0 && (
-              <div className="flex justify-between text-sm text-gray-500">
-                <span>ยอดรวม (ก่อนส่วนลด)</span>
+            {(totalItemDiscounts > 0 || billDiscountAmt > 0) && (
+              <div className="flex justify-between text-sm text-gray-400">
+                <span>ยอดก่อนส่วนลด</span>
                 <span>฿{fmt(grossSubtotal)}</span>
               </div>
             )}
             {totalItemDiscounts > 0 && (
               <div className="flex justify-between text-sm text-orange-500">
-                <span>ส่วนลดรายการ</span>
+                <span>ส่วนลดรายการ{selectedPromo ? ` (${selectedPromo.name})` : ''}</span>
                 <span>-฿{fmt(totalItemDiscounts)}</span>
               </div>
             )}
-            {billDiscountPct > 0 && (
-              <div className="flex justify-between text-sm text-orange-600">
-                <span>ส่วนลดบิล {billDiscountPct}%</span>
-                <span>-฿{fmt(billDiscountAmt)}</span>
-              </div>
-            )}
-            {totalDiscount > 0 && (
-              <div className="flex justify-between text-sm font-semibold text-red-600 bg-red-50 rounded px-2 py-1">
-                <span>รวมส่วนลดทั้งหมด</span>
-                <span>-฿{fmt(totalDiscount)}</span>
-              </div>
-            )}
-            {totalDiscount === 0 && (
-              <div className="flex justify-between text-sm text-gray-500">
-                <span>ยอดรวมย่อย</span>
-                <span>฿{fmt(subtotal)}</span>
-              </div>
-            )}
             <div className="flex justify-between text-lg font-bold text-gray-900 pt-1 border-t">
-              <span>ยอดสุทธิ</span>
+              <span>
+                ยอดสุทธิ
+                {billDiscountPct > 0 && (
+                  <span className="ml-1 text-xs font-normal text-blue-600">(รวมส่วนลด {billDiscountPct}% ในราคาแล้ว)</span>
+                )}
+              </span>
               <span>฿{fmt(total)}</span>
             </div>
           </div>

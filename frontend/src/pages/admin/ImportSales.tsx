@@ -79,7 +79,7 @@ export default function ImportSales() {
       if (r.status === 'matched') {
         matched++;
         totalQty += r.qty;
-        totalRevenue += r.qty * r.price;
+        totalRevenue += r.qty * r.price - (r.discount || 0); // Net revenue after discount
       }
     }
     return {
@@ -380,7 +380,9 @@ export default function ImportSales() {
                   <th className="table-header">สาขา</th>
                   <th className="table-header w-64">สินค้า</th>
                   <th className="table-header text-right">จำนวน</th>
-                  <th className="table-header text-right">ราคา</th>
+                  <th className="table-header text-right">ราคาต่อชิ้น</th>
+                  <th className="table-header text-right">ส่วนลด</th>
+                  <th className="table-header text-right">ยอดสุทธิ</th>
                   <th className="table-header text-center">สถานะ</th>
                   <th className="table-header">หมายเหตุ</th>
                   <th className="table-header w-10"></th>
@@ -388,7 +390,7 @@ export default function ImportSales() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filteredRows.length === 0 ? (
-                  <tr><td colSpan={8} className="p-8 text-center text-gray-400">ไม่มีข้อมูล</td></tr>
+                  <tr><td colSpan={11} className="p-8 text-center text-gray-400">ไม่มีข้อมูล</td></tr>
                 ) : filteredRows.map((row) => (
                   <tr key={row.rowNum} className={row.status === 'matched' ? 'hover:bg-green-50/30' : 'bg-red-50/20 hover:bg-red-50/40'}>
                     <td className="table-cell text-gray-400 text-xs">{row.rowNum}</td>
@@ -426,6 +428,14 @@ export default function ImportSales() {
                     </td>
                     <td className="table-cell text-right font-mono">{row.qty}</td>
                     <td className="table-cell text-right font-mono">฿{row.price.toFixed(2)}</td>
+                    <td className="table-cell text-right font-mono">
+                      {(row.discount || 0) > 0
+                        ? <span className="text-orange-600">-฿{(row.discount).toFixed(2)}</span>
+                        : <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className="table-cell text-right font-mono font-medium">
+                      ฿{(row.qty * row.price - (row.discount || 0)).toFixed(2)}
+                    </td>
                     <td className="table-cell text-center">
                       <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${STATUS_BADGE[row.status]}`}>
                         {row.status === 'matched' ? <CheckCircle2 size={11} /> : row.status === 'invalid' ? <XCircle size={11} /> : <AlertCircle size={11} />}

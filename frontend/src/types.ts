@@ -70,6 +70,7 @@ export interface Bill {
   saleDate: string | null;
   subtotal: string;
   discount: string;
+  discountPct: string;
   total: string;
   notes: string | null;
   createdAt: string;
@@ -126,7 +127,8 @@ export interface ImportPreviewRow {
   itemSku: string;
   itemBarcode: string;
   qty: number;
-  price: number;
+  price: number;    // Gross unit price
+  discount: number; // Total row discount amount
   status: 'matched' | 'no_branch' | 'no_item' | 'invalid';
   errors: string[];
 }
