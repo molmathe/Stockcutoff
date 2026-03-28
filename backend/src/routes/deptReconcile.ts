@@ -73,7 +73,7 @@ router.post('/preview', authenticate, requireSuperAdmin, upload.single('file'), 
           rawItem: row.rawItem.trim(),
           qty: row.qty,
           price: row.price,
-          amount: round2(row.price * row.qty),
+          amount: round2(row.price * row.qty - (row.discount || 0)),
           reason,
         });
         continue;
@@ -81,7 +81,8 @@ router.post('/preview', authenticate, requireSuperAdmin, upload.single('file'), 
 
       const dateStr = toThaiDateStr(row.saleDate);
       const key = `${dateStr}|${row.rawBranch.trim()}|${row.rawItem.trim()}`;
-      const totalAmount = round2(row.price * row.qty);
+      // Use net amount (gross - discount) so it is comparable with booth subtotal (also net)
+      const totalAmount = round2(row.price * row.qty - (row.discount || 0));
       const existing = consolidatedMap.get(key);
       if (existing) {
         existing.qty += row.qty;
@@ -150,7 +151,7 @@ router.post('/preview', authenticate, requireSuperAdmin, upload.single('file'), 
           },
         },
         include: {
-          bill: { select: { branchId: true, createdAt: true } },
+          bill: { select: { branchId: true, createdAt: true, discountPct: true, subtotal: true, total: true } },
           item: { select: { id: true, sku: true, barcode: true } },
         },
       });
@@ -180,7 +181,11 @@ router.post('/preview', authenticate, requireSuperAdmin, upload.single('file'), 
         // Normalize to PERMANENT branch ID so key matches consolidated lookup
         const key = `${billDate}|${permBranchId}|${bi.item.id}`;
         const existing = boothMap.get(key);
-        const amount = round2(Number(bi.subtotal));
+        // Apply bill-level discount proportionally to item subtotal
+        const billSubtotal = Number(bi.bill.subtotal);
+        const billTotal    = Number(bi.bill.total);
+        const billRatio    = billSubtotal > 0 ? billTotal / billSubtotal : 1;
+        const amount       = round2(Number(bi.subtotal) * billRatio);
         if (existing) {
           existing.qty += bi.quantity;
           existing.amount = round2(existing.amount + amount);
