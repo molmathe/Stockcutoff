@@ -277,7 +277,7 @@ export default function Bills() {
                       <Pencil size={15} />
                     </button>
                   )}
-                  {isSuperAdmin && bill.status === 'SUBMITTED' && (
+                  {isSuperAdmin && (bill.status === 'SUBMITTED' || bill.status === 'CANCELLED') && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();

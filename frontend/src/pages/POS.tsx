@@ -20,15 +20,6 @@ interface CartItem {
   price: number;
   discount: number;
   discountStr: string;
-  promoDiscount: number;
-}
-
-interface Promotion {
-  id: string;
-  name: string;
-  buyQty: number;
-  freeQty: number;
-  active: boolean;
 }
 
 const numericKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -57,9 +48,6 @@ export default function POS() {
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
   const [closingDay, setClosingDay] = useState(false);
-  const [promotions, setPromotions] = useState<Promotion[]>([]);
-  const [selectedPromoId, setSelectedPromoId] = useState<string>('');
-
   // Suggestion state
   const [suggestions, setSuggestions] = useState<Item[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -82,7 +70,6 @@ export default function POS() {
     if (isAdmin) {
       client.get('/branches').then((r) => setBranches(r.data)).catch(() => {});
     }
-    client.get('/promotions', { params: { active: 'true' } }).then((r) => setPromotions(r.data)).catch(() => {});
     loadSummary();
     inputRef.current?.focus();
   }, []);
@@ -148,17 +135,11 @@ export default function POS() {
   }, []);
 
   const addToCart = (item: Item) => {
-    const promo = promotions.find((p) => p.id === selectedPromoId);
     setCartItems((prev) => {
       const existing = prev.find((c) => c.itemId === item.id);
       if (existing) {
-        const newQty = existing.quantity + 1;
-        return prev.map((c) => {
-          if (c.itemId !== item.id) return c;
-          return { ...c, quantity: newQty, promoDiscount: calcPromoDiscount(c.price, newQty, promo) };
-        });
+        return prev.map((c) => c.itemId !== item.id ? c : { ...c, quantity: existing.quantity + 1 });
       }
-      const price = parseFloat(String(item.defaultPrice));
       return [...prev, {
         itemId: item.id,
         name: item.name,
@@ -166,10 +147,9 @@ export default function POS() {
         barcode: item.barcode,
         imageUrl: item.imageUrl,
         quantity: 1,
-        price,
+        price: parseFloat(String(item.defaultPrice)),
         discount: 0,
         discountStr: '0',
-        promoDiscount: calcPromoDiscount(price, 1, promo),
       }];
     });
     toast.success(`เพิ่ม: ${item.name}`, { duration: 1500, icon: '✅' });
@@ -230,10 +210,7 @@ export default function POS() {
 
   const updateQty = (itemId: string, qty: number) => {
     if (qty <= 0) { removeItem(itemId); return; }
-    const promo = promotions.find((p) => p.id === selectedPromoId);
-    setCartItems((prev) => prev.map((c) =>
-      c.itemId !== itemId ? c : { ...c, quantity: qty, promoDiscount: calcPromoDiscount(c.price, qty, promo) }
-    ));
+    setCartItems((prev) => prev.map((c) => c.itemId !== itemId ? c : { ...c, quantity: qty }));
   };
 
   const updatePrice = (itemId: string, priceStr: string) => {
@@ -247,22 +224,7 @@ export default function POS() {
     setCartItems((prev) => prev.map((c) => c.itemId === itemId ? { ...c, discount, discountStr: clean } : c));
   };
 
-  const calcPromoDiscount = (price: number, qty: number, promo: Promotion | undefined): number => {
-    if (!promo || (promo.buyQty + promo.freeQty) === 0) return 0;
-    const freeUnits = Math.floor(qty / (promo.buyQty + promo.freeQty)) * promo.freeQty;
-    return Math.round(freeUnits * price * 100) / 100;
-  };
-
-  const applyPromo = (promoId: string) => {
-    const promo = promotions.find((p) => p.id === promoId);
-    setSelectedPromoId(promoId);
-    setCartItems((prev) => prev.map((c) => ({
-      ...c,
-      promoDiscount: calcPromoDiscount(c.price, c.quantity, promo),
-    })));
-  };
-
-const removeItem = (itemId: string) => setCartItems((prev) => prev.filter((c) => c.itemId !== itemId));
+  const removeItem = (itemId: string) => setCartItems((prev) => prev.filter((c) => c.itemId !== itemId));
 
   const clearCart = () => {
     setCartItems([]);
@@ -270,17 +232,14 @@ const removeItem = (itemId: string) => setCartItems((prev) => prev.filter((c) =>
     setNotes('');
     setEditingBillId(null);
     setLastSaved(null);
-    setSelectedPromoId('');
   };
 
   const grossSubtotal = Math.round(cartItems.reduce((s, c) => s + c.price * c.quantity, 0) * 100) / 100;
-  const totalItemDiscounts = Math.round(cartItems.reduce((s, c) => s + c.discount + c.promoDiscount, 0) * 100) / 100;
+  const totalItemDiscounts = Math.round(cartItems.reduce((s, c) => s + c.discount, 0) * 100) / 100;
   const subtotal = Math.round((grossSubtotal - totalItemDiscounts) * 100) / 100;
   const billDiscountAmt = Math.round(subtotal * billDiscountPct) / 100;
   const totalDiscount = totalItemDiscounts + billDiscountAmt;
   const total = Math.max(0, subtotal - billDiscountAmt);
-  const selectedPromo = promotions.find((p) => p.id === selectedPromoId);
-
   const saveBill = async () => {
     if (cartItems.length === 0) { toast.error('ตะกร้าว่างเปล่า'); return; }
     const branchId = selectedBranch || user?.branchId;
@@ -296,7 +255,7 @@ const removeItem = (itemId: string) => setCartItems((prev) => prev.filter((c) =>
           itemId: c.itemId,
           quantity: c.quantity,
           price: c.price,
-          discount: Math.round((c.discount + c.promoDiscount) * 100) / 100,
+          discount: Math.round(c.discount * 100) / 100,
         })),
       };
       let billNumber: string;
@@ -527,23 +486,6 @@ const removeItem = (itemId: string) => setCartItems((prev) => prev.filter((c) =>
         {/* Bill options */}
         <div className="card">
           <h3 className="font-medium text-gray-700 mb-2">ตัวเลือกบิล</h3>
-          {promotions.length > 0 && (
-            <div className="mb-3">
-              <label className="label">โปรโมชั่น</label>
-              <select
-                value={selectedPromoId}
-                onChange={(e) => applyPromo(e.target.value)}
-                className="input"
-              >
-                <option value="">— ไม่มีโปรโมชั่น —</option>
-                {promotions.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} (ซื้อ {p.buyQty} แถม {p.freeQty})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label">ส่วนลดบิล (%)</label>
@@ -711,7 +653,7 @@ const removeItem = (itemId: string) => setCartItems((prev) => prev.filter((c) =>
           ) : (
             <div className="space-y-2">
               {cartItems.map((item) => {
-                const lineSubtotal = Math.round((item.price * item.quantity - item.discount - item.promoDiscount) * 100) / 100;
+                const lineSubtotal = Math.round((item.price * item.quantity - item.discount) * 100) / 100;
                 const effectiveLineTotal = Math.round(lineSubtotal * (1 - billDiscountPct / 100) * 100) / 100;
                 const effectivePricePerUnit = item.quantity > 0 ? Math.round(effectiveLineTotal / item.quantity * 100) / 100 : 0;
                 const isItemFree = item.price === 0 || effectiveLineTotal <= 0.001;
@@ -735,11 +677,6 @@ const removeItem = (itemId: string) => setCartItems((prev) => prev.filter((c) =>
                         {isItemFree && (
                           <span className="inline-flex text-[10px] font-bold bg-green-500 text-white px-1.5 py-0.5 rounded-full shrink-0">
                             Free Gift
-                          </span>
-                        )}
-                        {!isItemFree && item.promoDiscount > 0 && selectedPromo && (
-                          <span className="inline-flex text-[10px] font-bold bg-purple-500 text-white px-1.5 py-0.5 rounded-full shrink-0">
-                            PROMO
                           </span>
                         )}
                       </p>
@@ -841,7 +778,7 @@ const removeItem = (itemId: string) => setCartItems((prev) => prev.filter((c) =>
             )}
             {totalItemDiscounts > 0 && (
               <div className="flex justify-between text-sm text-orange-500">
-                <span>ส่วนลดรายการ{selectedPromo ? ` (${selectedPromo.name})` : ''}</span>
+                <span>ส่วนลดรายการ</span>
                 <span>-฿{fmt(totalItemDiscounts)}</span>
               </div>
             )}

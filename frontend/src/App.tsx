@@ -20,7 +20,6 @@ const UnresolvedSales = lazy(() => import('./pages/admin/UnresolvedSales').then(
 const AuditLogs = lazy(() => import('./pages/admin/AuditLogs'));
 const BlockedBarcodes = lazy(() => import('./pages/admin/BlockedBarcodes'));
 const Database = lazy(() => import('./pages/admin/Database'));
-const Promotions = lazy(() => import('./pages/admin/Promotions'));
 
 const Loader = () => (
   <div className="flex h-full items-center justify-center text-gray-400 text-sm">กำลังโหลด...</div>
@@ -56,7 +55,6 @@ function AppRoutes() {
           <Route path="admin/users" element={<Guard roles={['SUPER_ADMIN', 'BRANCH_ADMIN']}><Users /></Guard>} />
           <Route path="admin/reports" element={<Guard roles={['SUPER_ADMIN', 'BRANCH_ADMIN']}><Reports /></Guard>} />
           <Route path="admin/categories" element={<Guard roles={['SUPER_ADMIN', 'BRANCH_ADMIN']}><Categories /></Guard>} />
-          <Route path="admin/promotions" element={<Guard roles={['SUPER_ADMIN', 'BRANCH_ADMIN']}><Promotions /></Guard>} />
 {/* Removed ReportTemplates Route */}
           <Route path="admin/import-sales" element={<Guard roles={['SUPER_ADMIN']}><SalesManager initialTab="import" /></Guard>} />
           <Route path="admin/dept-reconcile" element={<Guard roles={['SUPER_ADMIN']}><SalesManager initialTab="reconcile" /></Guard>} />

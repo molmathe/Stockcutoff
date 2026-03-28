@@ -198,13 +198,3 @@ model UnresolvedSale {
   @@index([status])
   @@index([userId])
 }
-
-model Promotion {
-  id        String   @id @default(cuid())
-  name      String
-  buyQty    Int
-  freeQty   Int
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}

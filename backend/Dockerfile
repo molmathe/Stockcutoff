@@ -18,6 +18,7 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY prisma ./prisma
+COPY templates ./templates
 RUN mkdir -p uploads/temp
 EXPOSE 3001
 CMD ["sh", "-c", "until npx prisma migrate deploy; do echo 'DB not ready, retrying in 2s...'; sleep 2; done && node dist/index.js"]

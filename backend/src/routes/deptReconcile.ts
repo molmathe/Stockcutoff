@@ -39,6 +39,7 @@ router.post('/preview', authenticate, requireSuperAdmin, upload.single('file'), 
     const parsed = await parseExcelData(req.file.buffer, platform);
 
     const errorLogs: any[] = [];
+    const deductionRows: any[] = [];
 
     // ── 2. Aggregate consolidated rows by (date, branchCode, itemCode) ────────
     //       Handles duplicate rows in the same report by summing qty + amount
@@ -58,6 +59,22 @@ router.post('/preview', authenticate, requireSuperAdmin, upload.single('file'), 
           issue: 'INVALID_DATA',
           detail: `แถว ${row.rowNum}: ข้อมูลไม่ครบ (วันที่/สาขา/สินค้า)`,
           rowNum: row.rowNum,
+        });
+        continue;
+      }
+
+      // Report rows with qty ≤ 0 or price = 0 are deduction/void data — skip from processing
+      if (row.qty <= 0 || row.price === 0) {
+        const reason = row.qty < 0 ? 'QTY_NEGATIVE' : row.qty === 0 ? 'QTY_ZERO' : 'PRICE_ZERO';
+        deductionRows.push({
+          rowNum: row.rowNum,
+          date: toThaiDateStr(row.saleDate),
+          rawBranch: row.rawBranch.trim(),
+          rawItem: row.rawItem.trim(),
+          qty: row.qty,
+          price: row.price,
+          amount: round2(row.price * row.qty),
+          reason,
         });
         continue;
       }
@@ -141,8 +158,26 @@ router.post('/preview', authenticate, requireSuperAdmin, upload.single('file'), 
       for (const bi of boothItems) {
         const billDate = toThaiDateStr(bi.bill.createdAt);
         if (!allDates.includes(billDate)) continue;
-        // Normalize to PERMANENT branch ID so key matches consolidated lookup
+
         const permBranchId = anyBranchIdToPermId.get(bi.bill.branchId) ?? bi.bill.branchId;
+
+        // Reject booth items with non-positive qty or zero price — bad data, don't use in matching
+        if (bi.quantity <= 0 || Number(bi.price) === 0) {
+          const branch = branches.find(b => b.id === permBranchId);
+          errorLogs.push({
+            date: billDate,
+            rawBranch: branch?.reportBranchId || permBranchId,
+            rawItem: bi.item.barcode || bi.item.sku,
+            qty: bi.quantity,
+            amount: round2(Number(bi.subtotal)),
+            issue: 'INVALID_BOOTH_DATA',
+            detail: `ข้อมูลบูธผิดปกติ: qty=${bi.quantity}, price=${Number(bi.price)} (ไม่นำมาคำนวณ)`,
+            rowNum: null,
+          });
+          continue;
+        }
+
+        // Normalize to PERMANENT branch ID so key matches consolidated lookup
         const key = `${billDate}|${permBranchId}|${bi.item.id}`;
         const existing = boothMap.get(key);
         const amount = round2(Number(bi.subtotal));
@@ -243,14 +278,21 @@ router.post('/preview', authenticate, requireSuperAdmin, upload.single('file'), 
     const totalBoothQty           = allRows.reduce((s: number, r: any) => s + r.boothQty, 0);
     const totalBoothAmount        = round2(allRows.reduce((s: number, r: any) => s + r.boothAmount, 0));
 
+    // Rows where booth matched (boothQty > 0) vs no booth data at all
+    const matchedRows   = deptStoreSales.filter((r: any) => r.boothQty > 0).length + boothCovered.length;
+    const noBoothRows   = deptStoreSales.filter((r: any) => r.boothQty === 0).length;
+
     res.json({
       platform,
       stats: {
         consolidatedRows: consolidatedMap.size,
         deptStoreRows: deptStoreSales.length,
         boothCoveredRows: boothCovered.length,
+        matchedRows,
+        noBoothRows,
         reviewRows: reviewNeeded.length,
         errorRows: errorLogs.length,
+        deductionRows: deductionRows.length,
         totalConsolidatedQty,
         totalConsolidatedAmount,
         totalBoothQty,
@@ -262,6 +304,7 @@ router.post('/preview', authenticate, requireSuperAdmin, upload.single('file'), 
       boothCovered,
       reviewNeeded,
       errorLogs,
+      deductionRows,
     });
   } catch (err: any) {
     console.error('[deptReconcile preview]', err);

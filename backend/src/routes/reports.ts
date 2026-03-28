@@ -473,7 +473,7 @@ router.get('/export-bigseller', authenticate, requireAdmin, async (req: AuthRequ
       orderBy: { createdAt: 'asc' },
     });
 
-    const templatePath = path.resolve(process.cwd(), '../docs/excel_templates/bigseller_template.xlsx');
+    const templatePath = path.join(process.cwd(), 'templates', 'bigseller_template.xlsx');
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(templatePath);
     const ws = wb.worksheets[0]; // First sheet is the target

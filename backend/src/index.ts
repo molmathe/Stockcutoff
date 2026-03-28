@@ -15,7 +15,6 @@ import auditLogRoutes from './routes/auditLogs';
 import deptReconcileRoutes from './routes/deptReconcile';
 import blockedBarcodesRoutes from './routes/blockedBarcodes';
 import databaseRoutes from './routes/database';
-import promotionRoutes from './routes/promotions';
 import prisma from './lib/prisma';
 // Removed reportTemplateRoutes
 
@@ -90,7 +89,6 @@ app.use('/api/audit-logs', auditLogRoutes);
 app.use('/api/dept-reconcile', deptReconcileRoutes);
 app.use('/api/blocked-barcodes', blockedBarcodesRoutes);
 app.use('/api/database', databaseRoutes);
-app.use('/api/promotions', promotionRoutes);
 // Removed /api/report-templates route
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
