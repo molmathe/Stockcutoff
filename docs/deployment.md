@@ -46,6 +46,8 @@ DB_PASSWORD=replace-with-strong-random-password
 JWT_SECRET=replace-with-64-char-random-hex-string
 FRONTEND_URL=https://uat.example.com
 PORT=8082
+PORTAINER_PORT=9000
+UPTIME_KUMA_PORT=3002
 IMAGE_TAG=bootstrap
 TUNNEL_TOKEN=your_cloudflare_tunnel_token
 ```
@@ -54,6 +56,7 @@ Notes:
 
 - `IMAGE_TAG` is updated automatically by GitHub Actions on each deploy
 - `PORT` is bound to `127.0.0.1` only; internet traffic should enter through Cloudflare Tunnel
+- `PORTAINER_PORT` and `UPTIME_KUMA_PORT` are also bound to `127.0.0.1` only by default
 
 ## 3. Self-Hosted Runner
 
@@ -99,3 +102,27 @@ curl http://127.0.0.1:8082/health
 ```
 
 Then verify the UAT domain through Cloudflare.
+
+## 7. Local Monitoring UIs
+
+The deployment stack also includes two local-only monitoring tools:
+
+- Portainer on `http://127.0.0.1:${PORTAINER_PORT:-9000}`
+- Uptime Kuma on `http://127.0.0.1:${UPTIME_KUMA_PORT:-3002}`
+
+Open them from your workstation with SSH port forwarding:
+
+```bash
+ssh -L 9000:127.0.0.1:9000 -L 3002:127.0.0.1:3002 fonney-pc
+```
+
+Then browse:
+
+- `http://localhost:9000` for Portainer
+- `http://localhost:3002` for Uptime Kuma
+
+Recommended first checks in Uptime Kuma:
+
+- `https://pos.fonneygroup.com/health`
+- `http://127.0.0.1:8082/health`
+- `postgres` TCP on `127.0.0.1:5432` only if you intentionally publish it later

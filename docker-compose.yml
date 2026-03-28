@@ -132,6 +132,50 @@ services:
         max-size: "5m"
         max-file: "2"
 
+  portainer:
+    image: portainer/portainer-ce:lts
+    container_name: stockcutoff-portainer
+    restart: unless-stopped
+    command: -H unix:///var/run/docker.sock
+    ports:
+      - "127.0.0.1:${PORTAINER_PORT:-9000}:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    networks:
+      - app_net
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: '0.25'
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  uptime_kuma:
+    image: louislam/uptime-kuma:1
+    container_name: stockcutoff-uptime-kuma
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${UPTIME_KUMA_PORT:-3002}:3001"
+    volumes:
+      - uptime_kuma_data:/app/data
+    networks:
+      - app_net
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: '0.25'
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 networks:
   app_net:
     driver: bridge
@@ -139,3 +183,5 @@ networks:
 volumes:
   postgres_data:
   uploads:
+  portainer_data:
+  uptime_kuma_data:
