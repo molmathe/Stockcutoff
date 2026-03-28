@@ -202,10 +202,16 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     }
 
     let subtotal = 0;
-    const billItems = (items as any[]).map((it) => {
-      const qty = Number(it.quantity) || 0;
-      const price = Number(it.price) || 0;
+    const billItems = (items as any[]).map((it, idx) => {
+      const qty = Number(it.quantity);
+      const price = Number(it.price);
       const itemDiscount = Number(it.discount) || 0;
+      if (!Number.isFinite(qty) || qty <= 0 || !Number.isInteger(qty)) {
+        throw Object.assign(new Error(`รายการที่ ${idx + 1}: จำนวนต้องเป็นจำนวนเต็มบวก`), { status: 400 });
+      }
+      if (!Number.isFinite(price) || price < 0) {
+        throw Object.assign(new Error(`รายการที่ ${idx + 1}: ราคาไม่ถูกต้อง`), { status: 400 });
+      }
       const sub = round2(price * qty - itemDiscount);
       subtotal = round2(subtotal + sub);
       return { itemId: it.itemId, quantity: qty, price, discount: itemDiscount, subtotal: sub };
@@ -261,7 +267,8 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     };
     logAudit({ userId: req.user!.id, action: 'EDIT_BILL', entity: 'Bill', entityId: bill.id, detail: { billNumber: bill.billNumber, before: beforeSnapshot, after: afterSnapshot }, ip: getClientIp(req) });
     res.json(updated);
-  } catch {
+  } catch (err: any) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
     res.status(500).json({ error: 'Server error' });
   }
 });

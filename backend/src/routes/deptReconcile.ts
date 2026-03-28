@@ -188,10 +188,11 @@ router.post('/preview', authenticate, requireSuperAdmin, upload.single('file'), 
       const booth = boothMap.get(boothKey) ?? { qty: 0, amount: 0 };
       consumedBoothKeys.add(boothKey);
 
-      const storeQty    = round2(row.qty - booth.qty);
+      const storeQty    = row.qty - booth.qty;
       const storeAmount = round2(row.totalAmount - booth.amount);
       const isNegQty    = storeQty    < 0;
       const isNegAmt    = storeAmount < 0;
+      const isZeroQty   = storeQty   === 0;
 
       const baseRow = {
         date: row.date, branchId: branch.id, branchName: branch.name, branchCode: row.rawBranch,
@@ -206,10 +207,13 @@ router.post('/preview', authenticate, requireSuperAdmin, upload.single('file'), 
           ...baseRow,
           issue: isNegQty && isNegAmt ? 'NEGATIVE_BOTH' : isNegQty ? 'NEGATIVE_QTY' : 'NEGATIVE_AMOUNT',
         });
+      } else if (isZeroQty) {
+        // Booth qty fully covers consolidated qty — no dept store portion to import
+        reviewNeeded.push({ ...baseRow, issue: 'ZERO_STORE_QTY' });
       } else {
         deptStoreSales.push({
           ...baseRow,
-          unitPrice: storeQty > 0 ? round2(storeAmount / storeQty) : 0,
+          unitPrice: round2(storeAmount / storeQty),
         });
       }
     }
@@ -326,7 +330,7 @@ router.post('/submit', authenticate, requireSuperAdmin, async (req: AuthRequest,
             items: {
               create: rows.map((r: any) => ({
                 itemId: r.itemId,
-                quantity: r.storeQty > 0 ? r.storeQty : 1,
+                quantity: r.storeQty,
                 price: r.unitPrice || 0,
                 discount: 0,
                 subtotal: r.storeAmount,

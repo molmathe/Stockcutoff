@@ -77,13 +77,7 @@ router.post('/import', authenticate, requireSuperAdmin, upload.single('file'), a
   const filePath = req.file.path;
 
   try {
-    // 1. Create a safety backup first
-    // (Optional but highly recommended. For now, let's focus on the restore)
-
-    // 2. Disconnect prisma to prevent locks
-    await prisma.$disconnect();
-
-    // 3. Restore using gunzip and psql
+    // Restore using gunzip and psql
     // We use --clean and --if-exists to drop existing objects if they are in the dump
     // However, if the dump is just a standard pg_dump, we might need to drop the schema first
     // For a more robust restore, we can drop and recreate the public schema

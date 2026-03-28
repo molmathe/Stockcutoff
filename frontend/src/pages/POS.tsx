@@ -235,9 +235,9 @@ export default function POS() {
     setLastSaved(null);
   };
 
-  const grossSubtotal = cartItems.reduce((s, c) => s + c.price * c.quantity, 0);
-  const totalItemDiscounts = cartItems.reduce((s, c) => s + c.discount, 0);
-  const subtotal = grossSubtotal - totalItemDiscounts;
+  const grossSubtotal = Math.round(cartItems.reduce((s, c) => s + c.price * c.quantity, 0) * 100) / 100;
+  const totalItemDiscounts = Math.round(cartItems.reduce((s, c) => s + c.discount, 0) * 100) / 100;
+  const subtotal = Math.round((grossSubtotal - totalItemDiscounts) * 100) / 100;
   const billDiscountAmt = Math.round(subtotal * billDiscountPct) / 100;
   const totalDiscount = totalItemDiscounts + billDiscountAmt;
   const total = Math.max(0, subtotal - billDiscountAmt);

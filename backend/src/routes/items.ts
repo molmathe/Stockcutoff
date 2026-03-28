@@ -139,6 +139,12 @@ router.delete('/bulk', authenticate, requireAdmin, async (req: AuthRequest, res:
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ error: 'กรุณาระบุรายการที่ต้องการลบ' });
     }
+    const inActiveBills = await prisma.billItem.findFirst({
+      where: { itemId: { in: ids }, bill: { status: { in: ['OPEN', 'SUBMITTED'] } } },
+    });
+    if (inActiveBills) {
+      return res.status(400).json({ error: 'ไม่สามารถลบสินค้าที่อยู่ในบิล OPEN หรือ SUBMITTED ได้' });
+    }
     await prisma.item.deleteMany({ where: { id: { in: ids } } });
     res.json({ message: `ลบ ${ids.length} สินค้า` });
   } catch {

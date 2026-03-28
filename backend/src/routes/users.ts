@@ -88,6 +88,7 @@ router.put('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Res
     }
 
     // Password change: only allowed by SUPER_ADMIN, or BRANCH_ADMIN updating own-branch cashier
+    const passwordChanged = !!password;
     if (password) {
       data.password = await bcrypt.hash(password, 10);
     }
@@ -101,7 +102,7 @@ router.put('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Res
       entity: 'User',
       entityId: user.id,
       ip: getClientIp(req),
-      detail: { username: user.username, name: user.name, role: user.role }
+      detail: { username: user.username, name: user.name, role: user.role, passwordChanged }
     });
 
     res.json(safeUser(user));
