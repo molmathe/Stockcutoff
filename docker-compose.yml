@@ -107,6 +107,29 @@ services:
         max-size: "5m"
         max-file: "2"
 
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: stockcutoff-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+    depends_on:
+      nginx:
+        condition: service_started
+    networks:
+      - app_net
+    deploy:
+      resources:
+        limits:
+          memory: 64m
+          cpus: '0.25'
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
 networks:
   app_net:
     driver: bridge
