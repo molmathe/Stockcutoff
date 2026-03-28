@@ -70,7 +70,11 @@ async function main() {
     { sku: 'SNACK002', barcode: '8850006540025', name: 'ช็อกโกแลตแท่ง', description: 'ดาร์กช็อกโกแลต 70%', defaultPrice: 45.00, category: 'ขนม' },
   ];
   for (const item of items) {
-    await prisma.item.upsert({ where: { sku: item.sku }, update: {}, create: item });
+    await prisma.item.upsert({
+      where: { barcode: item.barcode },
+      update: item,
+      create: item,
+    });
   }
   console.log('✅ Items seeded');
 

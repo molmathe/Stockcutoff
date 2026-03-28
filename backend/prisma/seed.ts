@@ -76,8 +76,8 @@ async function main() {
 
   for (const item of sampleItems) {
     await prisma.item.upsert({
-      where: { sku: item.sku },
-      update: {},
+      where: { barcode: item.barcode },
+      update: item,
       create: item,
     });
   }
