@@ -79,6 +79,12 @@ export default function Bills() {
     onError: () => toast.error('ยกเลิกบิลไม่สำเร็จ'),
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => client.delete(`/bills/${id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bills'] }); toast.success('ลบบิลเรียบร้อย'); },
+    onError: (e: any) => toast.error(e?.response?.data?.error || 'ลบบิลไม่สำเร็จ'),
+  });
+
   const editMutation = useMutation({
     mutationFn: (data: { id: string; items: any[]; notes: string; discount: number }) =>
       client.put(`/bills/${data.id}`, { items: data.items, notes: data.notes, discount: data.discount }),
@@ -269,6 +275,17 @@ export default function Bills() {
                     <button onClick={(e) => { e.stopPropagation(); openEditModal(bill); }}
                       className="text-blue-400 hover:text-blue-600 shrink-0" title="แก้ไขบิล">
                       <Pencil size={15} />
+                    </button>
+                  )}
+                  {isSuperAdmin && bill.status === 'SUBMITTED' && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!confirm(`ยืนยันการลบบิล ${bill.billNumber}?\n\nบิลจะถูกลบถาวรและไม่สามารถกู้คืนได้`)) return;
+                        deleteMutation.mutate(bill.id);
+                      }}
+                      className="text-red-500 hover:text-red-700 shrink-0" title="ลบบิลถาวร">
+                      <Trash2 size={15} />
                     </button>
                   )}
                   {expanded === bill.id ? <ChevronUp size={16} className="text-gray-400 shrink-0" /> : <ChevronDown size={16} className="text-gray-400 shrink-0" />}

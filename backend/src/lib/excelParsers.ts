@@ -9,7 +9,8 @@ export interface ParsedRow {
   rawBranch: string;
   rawItem: string;
   qty: number;
-  price: number; // Unit price (derived from total amount / qty if needed)
+  price: number;    // Gross unit price (totalAmount / qty)
+  discount: number; // Total row discount amount (across all units in this row)
 }
 
 /** Parse a cell value from ExcelJS into a JS Date */
@@ -71,32 +72,35 @@ export async function parseExcelData(buffer: Buffer, platform: ImportPlatform): 
   });
 
   // Expected column matching depending on platform
-  let dateCol = -1, branchCol = -1, itemCol = -1, qtyCol = -1, totalCol = -1;
+  let dateCol = -1, branchCol = -1, itemCol = -1, qtyCol = -1, totalCol = -1, discountCol = -1;
 
   if (platform === 'PLAYHOUSE') {
     dateCol = findColIdx(headers, ['date', 'วันที่']);
     branchCol = findColIdx(headers, ['branch', 'สาขา']);
     itemCol = findColIdx(headers, ['sku', 'barcode']);
     qtyCol = findColIdx(headers, ['sales quantity', 'quantity', 'จำนวน']);
-    totalCol = findColIdx(headers, ['net sales', 'total', 'ยอดสุทธิ']);
+    totalCol = findColIdx(headers, ['gross sales', 'net sales', 'total', 'ยอดขาย', 'ยอดรวม']);
+    discountCol = findColIdx(headers, ['discount', 'ส่วนลด', 'disc', 'promo']);
   } else if (platform === 'MBK') {
     dateCol = findColIdx(headers, ['trans date', 'date']);
     branchCol = findColIdx(headers, ['store name', 'branch']);
-    // MBK usually matches by barcode
     itemCol = findColIdx(headers, ['barcode']);
     qtyCol = findColIdx(headers, ['quantity', 'qty']);
-    totalCol = findColIdx(headers, ['net sale', 'sales amt', 'amount']);
+    totalCol = findColIdx(headers, ['gross sale', 'net sale', 'sales amt', 'amount']);
+    discountCol = findColIdx(headers, ['discount', 'disc', 'ส่วนลด']);
   } else if (platform === 'CENTRAL') {
     dateCol = findColIdx(headers, ['sales date', 'date']);
     branchCol = findColIdx(headers, ['store number', 'store name']);
     itemCol = findColIdx(headers, ['barcode', 'sku']);
     qtyCol = findColIdx(headers, ['sales quantity', 'qty']);
-    totalCol = findColIdx(headers, ['total net sales', 'net sales']);
+    totalCol = findColIdx(headers, ['total sales', 'gross sales', 'total net sales', 'net sales']);
+    discountCol = findColIdx(headers, ['discount', 'disc', 'ส่วนลด', 'promotion']);
   }
 
   // Fallbacks if headers are slightly different
   if (qtyCol === -1) qtyCol = findColIdx(headers, ['qty']);
   if (totalCol === -1) totalCol = findColIdx(headers, ['price', 'amt']);
+  if (discountCol === -1) discountCol = findColIdx(headers, ['discount', 'disc', 'ส่วนลด']);
 
   ws.eachRow((row, rowNum) => {
     if (rowNum <= headerRowIdx) return; // skip headers
@@ -111,14 +115,16 @@ export async function parseExcelData(buffer: Buffer, platform: ImportPlatform): 
     }
     const rawQtyVal = getCellVal(qtyCol);
     const rawTotalVal = getCellVal(totalCol);
+    const rawDiscountVal = discountCol >= 0 ? getCellVal(discountCol) : null;
 
     // Skip empty summary lines (must have at least date, branch, or item)
     if (!rawBranch && !rawItem && !rawDateVal) return;
 
     const saleDate = parseExcelDate(rawDateVal);
     const qty = parseFloat(cellStr(rawQtyVal)) || 0;
-    const totalAmount = parseFloat(cellStr(rawTotalVal)) || 0;
-    const price = qty > 0 ? totalAmount / qty : 0; // Derive unit price
+    const totalAmount = parseFloat(cellStr(rawTotalVal)) || 0;  // Gross total for this row
+    const discountAmount = Math.max(0, parseFloat(cellStr(rawDiscountVal)) || 0); // Row-level discount
+    const price = qty > 0 ? totalAmount / qty : 0; // Gross unit price
 
     rows.push({
       rowNum,
@@ -128,6 +134,7 @@ export async function parseExcelData(buffer: Buffer, platform: ImportPlatform): 
       rawItem,
       qty,
       price,
+      discount: discountAmount,
     });
   });
 

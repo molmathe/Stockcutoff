@@ -3,7 +3,7 @@ import toast from 'react-hot-toast';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   GitMerge, Upload, FileSpreadsheet, X, CheckCircle2,
-  ChevronDown, ChevronUp, Clock, Save, Trash2, AlertCircle,
+  ChevronDown, ChevronUp, Clock, Save, Trash2, AlertCircle, Download,
 } from 'lucide-react';
 import client from '../../api/client';
 
@@ -28,7 +28,7 @@ interface DeptStoreSaleRow {
 }
 
 interface ReviewRow extends Omit<DeptStoreSaleRow, 'unitPrice'> {
-  issue: 'NEGATIVE_QTY' | 'NEGATIVE_AMOUNT' | 'NEGATIVE_BOTH';
+  issue: 'NEGATIVE_QTY' | 'NEGATIVE_AMOUNT' | 'NEGATIVE_BOTH' | 'ZERO_STORE_QTY';
 }
 
 interface ErrorRow {
@@ -49,6 +49,10 @@ interface ReconcilePreview {
     deptStoreRows: number;
     reviewRows: number;
     errorRows: number;
+    totalConsolidatedQty: number;
+    totalConsolidatedAmount: number;
+    totalBoothQty: number;
+    totalBoothAmount: number;
     totalDeptQty: number;
     totalDeptAmount: number;
   };
@@ -69,6 +73,7 @@ const ISSUE_LABEL: Record<string, string> = {
   NEGATIVE_QTY:      'จำนวนติดลบ',
   NEGATIVE_AMOUNT:   'ยอดเงินติดลบ',
   NEGATIVE_BOTH:     'จำนวน+ยอดติดลบ',
+  ZERO_STORE_QTY:    'บูธขายครบ (ไม่มีส่วนหน้าร้าน)',
   UNKNOWN_BRANCH:    'ไม่พบสาขา',
   UNKNOWN_ITEM:      'ไม่พบสินค้า',
   ORPHANED_BOOTH:    'บูธสแกนแต่ไม่มีในรายงาน',
@@ -79,6 +84,7 @@ const ISSUE_COLOR: Record<string, string> = {
   NEGATIVE_QTY:    'bg-orange-100 text-orange-700',
   NEGATIVE_AMOUNT: 'bg-orange-100 text-orange-700',
   NEGATIVE_BOTH:   'bg-red-100 text-red-700',
+  ZERO_STORE_QTY:  'bg-blue-100 text-blue-700',
   UNKNOWN_BRANCH:  'bg-red-100 text-red-700',
   UNKNOWN_ITEM:    'bg-yellow-100 text-yellow-700',
   ORPHANED_BOOTH:  'bg-purple-100 text-purple-700',
@@ -123,6 +129,7 @@ export default function DeptReconcile() {
   const [activeTab, setActiveTab]   = useState<TabId>('sales');
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [dupConflict, setDupConflict] = useState<{ saleDate: string; branchName: string }[] | null>(null);
+  const [exporting, setExporting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { data: drafts = [] } = useQuery<Draft[]>({
@@ -231,6 +238,28 @@ export default function DeptReconcile() {
         toast.error(err.response?.data?.error || 'นำเข้าไม่สำเร็จ');
       }
     } finally { setSubmitting(false); }
+  };
+
+  const handleExport = async () => {
+    if (!preview) return;
+    setExporting(true);
+    try {
+      const res = await client.post('/dept-reconcile/export', {
+        platform: preview.platform,
+        deptStoreSales: preview.deptStoreSales,
+        reviewNeeded: preview.reviewNeeded,
+        stats: preview.stats,
+        fileName: (preview as any)._fileName || file?.name,
+      }, { responseType: 'blob' });
+      const url = URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `reconcile-${preview.platform}-${new Date().toISOString().split('T')[0]}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error('ดาวน์โหลดไม่สำเร็จ');
+    } finally { setExporting(false); }
   };
 
   const handleSubmit = async () => {
@@ -397,22 +426,32 @@ export default function DeptReconcile() {
             <button onClick={() => setPreview(null)} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
           </div>
 
-          {/* Stats Bar */}
-          <div className="bg-white border-b px-5 py-3 shrink-0">
-            <div className="flex flex-wrap gap-5">
-              {[
-                { label: 'แถวรายงานรวม', value: stats!.consolidatedRows, color: 'text-gray-700' },
-                { label: 'ยอดขายหน้าร้าน', value: stats!.deptStoreRows, color: 'text-green-600' },
-                { label: 'ต้องตรวจสอบ', value: stats!.reviewRows, color: 'text-orange-500' },
-                { label: 'ข้อผิดพลาด', value: stats!.errorRows, color: 'text-red-500' },
-                { label: 'รวมจำนวน (ร้าน)', value: stats!.totalDeptQty.toLocaleString(), color: 'text-indigo-600' },
-                { label: 'รวมยอด (ร้าน)', value: `฿${fmt(stats!.totalDeptAmount)}`, color: 'text-indigo-700' },
-              ].map(s => (
-                <div key={s.label} className="flex items-baseline gap-1">
-                  <span className={`text-lg font-bold ${s.color}`}>{s.value}</span>
-                  <span className="text-xs text-gray-400">{s.label}</span>
-                </div>
-              ))}
+          {/* Stats Bar — Reconciliation Formula */}
+          <div className="bg-white border-b px-5 py-3 shrink-0 space-y-2">
+            {/* Formula: Consolidated - Booth = Net */}
+            <div className="flex items-center gap-2 flex-wrap text-sm">
+              <div className="flex flex-col items-center px-3 py-1.5 bg-gray-50 rounded-lg border">
+                <span className="text-xs text-gray-400">รายงานรวม</span>
+                <span className="font-bold text-gray-700">{(stats!.totalConsolidatedQty ?? 0).toLocaleString()} ชิ้น</span>
+                <span className="text-xs text-gray-500">฿{fmt(stats!.totalConsolidatedAmount ?? 0)}</span>
+              </div>
+              <span className="text-xl font-bold text-gray-400">−</span>
+              <div className="flex flex-col items-center px-3 py-1.5 bg-blue-50 rounded-lg border border-blue-100">
+                <span className="text-xs text-blue-400">บูธ POS</span>
+                <span className="font-bold text-blue-600">{(stats!.totalBoothQty ?? 0).toLocaleString()} ชิ้น</span>
+                <span className="text-xs text-blue-500">฿{fmt(stats!.totalBoothAmount ?? 0)}</span>
+              </div>
+              <span className="text-xl font-bold text-gray-400">=</span>
+              <div className="flex flex-col items-center px-3 py-1.5 bg-green-50 rounded-lg border border-green-200">
+                <span className="text-xs text-green-500">ยอดหน้าร้าน (Net)</span>
+                <span className="font-bold text-green-700">{stats!.totalDeptQty.toLocaleString()} ชิ้น</span>
+                <span className="text-xs text-green-600 font-semibold">฿{fmt(stats!.totalDeptAmount)}</span>
+              </div>
+              <div className="ml-auto flex gap-4 text-xs text-gray-400 flex-wrap">
+                <span>{stats!.consolidatedRows} แถวรายงาน</span>
+                <span className="text-orange-500">{stats!.reviewRows} ต้องตรวจสอบ</span>
+                <span className="text-red-500">{stats!.errorRows} ข้อผิดพลาด</span>
+              </div>
             </div>
           </div>
 
@@ -616,8 +655,13 @@ export default function DeptReconcile() {
                 <span className="ml-3 text-orange-500">⚠️ {stats!.reviewRows} รายการส่งไป Unresolved</span>
               )}
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap justify-end">
               <button onClick={() => setPreview(null)} className="btn-secondary">ปิด</button>
+              <button onClick={handleExport} disabled={exporting}
+                className="btn-secondary flex items-center gap-1.5 text-indigo-600 border-indigo-200 hover:bg-indigo-50">
+                <Download size={14} />
+                {exporting ? 'กำลังดาวน์โหลด...' : 'ดาวน์โหลด Excel'}
+              </button>
               <button onClick={handleSaveDraft} disabled={saving}
                 className="btn-secondary flex items-center gap-1.5 text-gray-700 hover:bg-gray-100">
                 <Save size={14} />

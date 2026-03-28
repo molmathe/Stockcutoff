@@ -343,4 +343,35 @@ router.put('/:id/cancel', authenticate, async (req: AuthRequest, res: Response) 
   }
 });
 
+// DELETE /bills/:id — hard delete a SUBMITTED bill (SUPER_ADMIN only)
+router.delete('/:id', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    if (req.user!.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ error: 'เฉพาะ SUPER_ADMIN เท่านั้นที่ลบบิลได้' });
+    }
+
+    const bill = await prisma.bill.findUnique({
+      where: { id: req.params.id },
+      include: { items: true },
+    });
+    if (!bill) return res.status(404).json({ error: 'ไม่พบบิล' });
+    if (bill.status !== 'SUBMITTED') {
+      return res.status(400).json({ error: 'ลบได้เฉพาะบิลที่ส่งแล้ว (SUBMITTED) เท่านั้น' });
+    }
+
+    await prisma.bill.delete({ where: { id: req.params.id } });
+    logAudit({
+      userId: req.user!.id,
+      action: 'DELETE_BILL',
+      entity: 'Bill',
+      entityId: bill.id,
+      detail: { billNumber: bill.billNumber, total: Number(bill.total), itemCount: bill.items.length },
+      ip: getClientIp(req),
+    });
+    res.json({ message: `ลบบิล ${bill.billNumber} เรียบร้อยแล้ว` });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 export default router;

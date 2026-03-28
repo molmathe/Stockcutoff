@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
+import ExcelJS from 'exceljs';
 import prisma from '../lib/prisma';
 import { authenticate, requireSuperAdmin, AuthRequest } from '../middleware/auth';
 import { parseExcelData, ImportPlatform } from '../lib/excelParsers';
@@ -234,6 +235,13 @@ router.post('/preview', authenticate, requireSuperAdmin, upload.single('file'), 
       });
     }
 
+    // Compute totals across all rows (including review) for reconciliation formula
+    const allRows = [...deptStoreSales, ...reviewNeeded];
+    const totalConsolidatedQty    = allRows.reduce((s: number, r: any) => s + r.consolidatedQty, 0);
+    const totalConsolidatedAmount = round2(allRows.reduce((s: number, r: any) => s + r.consolidatedAmount, 0));
+    const totalBoothQty           = allRows.reduce((s: number, r: any) => s + r.boothQty, 0);
+    const totalBoothAmount        = round2(allRows.reduce((s: number, r: any) => s + r.boothAmount, 0));
+
     res.json({
       platform,
       stats: {
@@ -241,6 +249,10 @@ router.post('/preview', authenticate, requireSuperAdmin, upload.single('file'), 
         deptStoreRows: deptStoreSales.length,
         reviewRows: reviewNeeded.length,
         errorRows: errorLogs.length,
+        totalConsolidatedQty,
+        totalConsolidatedAmount,
+        totalBoothQty,
+        totalBoothAmount,
         totalDeptQty: deptStoreSales.reduce((s: number, r: any) => s + r.storeQty, 0),
         totalDeptAmount: round2(deptStoreSales.reduce((s: number, r: any) => s + r.storeAmount, 0)),
       },
@@ -390,6 +402,150 @@ router.post('/submit', authenticate, requireSuperAdmin, async (req: AuthRequest,
   } catch (err: any) {
     console.error('[deptReconcile submit]', err);
     res.status(500).json({ error: err.message || 'Server error' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /dept-reconcile/export
+// Generate Excel reconciliation report from preview data
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/export', authenticate, requireSuperAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { platform, deptStoreSales = [], reviewNeeded = [], stats, fileName } = req.body;
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'StockCutoff';
+
+    // ── Sheet 1: Dept Store Sales (valid rows) ────────────────────────────────
+    const ws1 = wb.addWorksheet('ยอดขายหน้าร้าน');
+    ws1.columns = [
+      { header: 'วันที่', key: 'date', width: 14 },
+      { header: 'สาขา', key: 'branchName', width: 22 },
+      { header: 'รหัสสาขา', key: 'branchCode', width: 16 },
+      { header: 'ชื่อสินค้า', key: 'itemName', width: 32 },
+      { header: 'SKU', key: 'itemSku', width: 14 },
+      { header: 'Barcode', key: 'itemBarcode', width: 18 },
+      { header: 'รายงานรวม (จำนวน)', key: 'consolidatedQty', width: 20 },
+      { header: 'รายงานรวม (ยอด)', key: 'consolidatedAmount', width: 20 },
+      { header: 'บูธ POS (จำนวน)', key: 'boothQty', width: 18 },
+      { header: 'บูธ POS (ยอด)', key: 'boothAmount', width: 18 },
+      { header: 'หน้าร้าน (จำนวน)', key: 'storeQty', width: 18 },
+      { header: 'หน้าร้าน (ยอด)', key: 'storeAmount', width: 18 },
+      { header: 'ราคา/หน่วย', key: 'unitPrice', width: 14 },
+    ];
+    for (const r of deptStoreSales) {
+      ws1.addRow({
+        date: r.date, branchName: r.branchName, branchCode: r.branchCode,
+        itemName: r.itemName, itemSku: r.itemSku, itemBarcode: r.itemBarcode,
+        consolidatedQty: r.consolidatedQty, consolidatedAmount: r.consolidatedAmount,
+        boothQty: r.boothQty, boothAmount: r.boothAmount,
+        storeQty: r.storeQty, storeAmount: r.storeAmount,
+        unitPrice: r.unitPrice || 0,
+      });
+    }
+    // Summary row
+    if (deptStoreSales.length > 0) {
+      const sumRow = ws1.addRow({
+        date: 'รวม', branchName: '', branchCode: '', itemName: '', itemSku: '', itemBarcode: '',
+        consolidatedQty: stats?.totalConsolidatedQty ?? deptStoreSales.reduce((s: number, r: any) => s + r.consolidatedQty, 0),
+        consolidatedAmount: stats?.totalConsolidatedAmount ?? round2(deptStoreSales.reduce((s: number, r: any) => s + r.consolidatedAmount, 0)),
+        boothQty: stats?.totalBoothQty ?? deptStoreSales.reduce((s: number, r: any) => s + r.boothQty, 0),
+        boothAmount: stats?.totalBoothAmount ?? round2(deptStoreSales.reduce((s: number, r: any) => s + r.boothAmount, 0)),
+        storeQty: stats?.totalDeptQty ?? deptStoreSales.reduce((s: number, r: any) => s + r.storeQty, 0),
+        storeAmount: stats?.totalDeptAmount ?? round2(deptStoreSales.reduce((s: number, r: any) => s + r.storeAmount, 0)),
+        unitPrice: '',
+      });
+      sumRow.font = { bold: true };
+      sumRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } };
+    }
+    // Style header
+    ws1.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    ws1.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } };
+    // Highlight booth columns blue, store columns green
+    for (let r = 2; r <= ws1.rowCount; r++) {
+      const row = ws1.getRow(r);
+      if (r === ws1.rowCount) continue; // skip summary (already styled)
+      (['boothQty', 'boothAmount'] as const).forEach(k => {
+        const cell = row.getCell(k as string);
+        cell.font = { color: { argb: 'FF1D4ED8' } };
+      });
+      (['storeQty', 'storeAmount'] as const).forEach(k => {
+        const cell = row.getCell(k as string);
+        cell.font = { bold: true, color: { argb: 'FF16A34A' } };
+      });
+    }
+
+    // ── Sheet 2: Review rows ──────────────────────────────────────────────────
+    const ws2 = wb.addWorksheet('ต้องตรวจสอบ');
+    ws2.columns = [
+      { header: 'ปัญหา', key: 'issue', width: 20 },
+      { header: 'วันที่', key: 'date', width: 14 },
+      { header: 'สาขา', key: 'branchName', width: 22 },
+      { header: 'รหัสสาขา', key: 'branchCode', width: 16 },
+      { header: 'สินค้า', key: 'itemName', width: 32 },
+      { header: 'Barcode', key: 'itemBarcode', width: 18 },
+      { header: 'Consolidated จำนวน', key: 'consolidatedQty', width: 20 },
+      { header: 'Consolidated ยอด', key: 'consolidatedAmount', width: 20 },
+      { header: 'บูธ จำนวน', key: 'boothQty', width: 14 },
+      { header: 'บูธ ยอด', key: 'boothAmount', width: 14 },
+      { header: 'คำนวณได้ จำนวน', key: 'storeQty', width: 18 },
+      { header: 'คำนวณได้ ยอด', key: 'storeAmount', width: 18 },
+    ];
+    const ISSUE_LABEL: Record<string, string> = {
+      NEGATIVE_QTY: 'จำนวนติดลบ', NEGATIVE_AMOUNT: 'ยอดเงินติดลบ',
+      NEGATIVE_BOTH: 'จำนวน+ยอดติดลบ', ZERO_STORE_QTY: 'บูธขายครบ (ไม่มีหน้าร้าน)',
+    };
+    for (const r of reviewNeeded) {
+      ws2.addRow({
+        issue: ISSUE_LABEL[r.issue] ?? r.issue,
+        date: r.date, branchName: r.branchName, branchCode: r.branchCode,
+        itemName: r.itemName, itemBarcode: r.itemBarcode,
+        consolidatedQty: r.consolidatedQty, consolidatedAmount: r.consolidatedAmount,
+        boothQty: r.boothQty, boothAmount: r.boothAmount,
+        storeQty: r.storeQty, storeAmount: r.storeAmount,
+      });
+    }
+    ws2.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    ws2.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD97706' } };
+
+    // ── Sheet 3: Reconciliation Summary ──────────────────────────────────────
+    const ws3 = wb.addWorksheet('สรุปการคัดแยก');
+    ws3.getColumn(1).width = 32;
+    ws3.getColumn(2).width = 20;
+    ws3.getColumn(3).width = 20;
+    const addSummaryRow = (label: string, qty: number | string, amount: number | string, bold = false) => {
+      const row = ws3.addRow([label, qty, amount]);
+      if (bold) row.font = { bold: true };
+      return row;
+    };
+    ws3.addRow(['การคัดแยกยอดขายหน้าร้าน', 'จำนวน (ชิ้น)', 'ยอดเงิน (฿)']).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    ws3.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } };
+    ws3.addRow(['แพลตฟอร์ม', platform || '—', '']);
+    ws3.addRow(['ไฟล์', fileName || '—', '']);
+    ws3.addRow([]);
+    const r1 = addSummaryRow('รายงานรวม (Consolidated)', stats?.totalConsolidatedQty ?? '—', stats?.totalConsolidatedAmount ?? '—');
+    r1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF6FF' } };
+    const r2 = addSummaryRow('หักยอดบูธ (POS)', stats?.totalBoothQty ?? '—', stats?.totalBoothAmount ?? '—');
+    r2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } };
+    r2.getCell(2).font = { color: { argb: 'FF1D4ED8' } };
+    r2.getCell(3).font = { color: { argb: 'FF1D4ED8' } };
+    ws3.addRow(['']);
+    const r3 = addSummaryRow('= ยอดขายหน้าร้าน (Net)', stats?.totalDeptQty ?? '—', stats?.totalDeptAmount ?? '—', true);
+    r3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } };
+    r3.getCell(2).font = { bold: true, color: { argb: 'FF16A34A' } };
+    r3.getCell(3).font = { bold: true, color: { argb: 'FF16A34A' } };
+    ws3.addRow([]);
+    addSummaryRow('จำนวนแถวที่นำเข้า (หน้าร้าน)', stats?.deptStoreRows ?? deptStoreSales.length, '');
+    addSummaryRow('จำนวนแถวที่ต้องตรวจสอบ', stats?.reviewRows ?? reviewNeeded.length, '');
+
+    const exportName = `reconcile-${platform || 'export'}-${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(exportName)}`);
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (err: any) {
+    console.error('[deptReconcile export]', err);
+    res.status(500).json({ error: err.message || 'Export failed' });
   }
 });
 

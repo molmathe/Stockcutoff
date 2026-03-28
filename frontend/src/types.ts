@@ -127,7 +127,8 @@ export interface ImportPreviewRow {
   itemSku: string;
   itemBarcode: string;
   qty: number;
-  price: number;
+  price: number;    // Gross unit price
+  discount: number; // Total row discount amount
   status: 'matched' | 'no_branch' | 'no_item' | 'invalid';
   errors: string[];
 }
