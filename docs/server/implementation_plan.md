@@ -1,97 +1,95 @@
-# Server Setup & Deployment Plan (Ubuntu + Docker + Cloudflare Tunnel)
+# Server Setup and UAT CI/CD Plan
 
-This plan outlines the steps to prepare a fresh Ubuntu server, deploy the Stockcutoff application using Docker Compose, and expose it to the internet securely via a Cloudflare Tunnel.
+This document captures the deployment model currently implemented for the repository:
 
-## User Review Required
+- UAT deploys are triggered by pushes to the `uat` branch
+- GitHub Actions builds backend/frontend Docker images and pushes them to GHCR
+- GitHub Actions SSHes into the UAT server and deploys the new `IMAGE_TAG`
+- GitHub Actions creates an environment-specific git tag after a successful deploy
 
-> [!IMPORTANT]
-> - You will need a **Cloudflare account** with a domain added to it.
-> - You must create a **Cloudfare Tunnel** in the [Cloudflare Zero Trust dashboard](https://one.dash.cloudflare.com/) and obtain a **Tunnel Token**.
-> - Ensure your server's firewall (ufw) is configured, although Cloudflare Tunnel does not require opening any *inbound* ports (only outbound 443).
+## Deployment Model
 
-## Proposed Changes
+### Source of Truth
 
-### 1. Server Initialization (Ubuntu)
-Standard procedure to install Docker Engine and Docker Compose on a fresh Ubuntu instance.
+- `VERSION` controls the semantic version line
+- The workflow derives:
+  - image tag: `MAJOR.MINOR.PATCH-uat-<sha>.<run-number>`
+  - git tag: `uat-vMAJOR.MINOR.PATCH+<sha>.<run-number>`
 
-```bash
-# Update and install dependencies
-sudo apt-get update
-sudo apt-get install -y ca-certificates curl gnupg
+### Runtime Topology
 
-# Add Docker's official GPG key
-sudo install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-sudo chmod a+r /etc/apt/keyrings/docker.gpg
+- `postgres`, `backend`, `frontend`, `nginx`, and `tunnel` run via Docker Compose
+- `backend` and `frontend` resolve to GHCR images tagged by CI/CD
+- `nginx` binds only to `127.0.0.1:${PORT}`
+- Cloudflare Tunnel is the intended public ingress path
 
-# Set up the repository
-echo \
-  "deb [arch=\"$(dpkg --print-architecture)\" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-  $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" | \
-  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+## One-Time Server Preparation
 
-sudo apt-get update
+Run `scripts/setup-server.sh` on the Ubuntu server with:
 
-# Install Docker Engine and Compose
-sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+- Docker Engine
+- Docker Compose plugin
+- timezone set to `Asia/Bangkok`
+- deployment directory created at `/opt/stockcutoff-uat`
+- deployment user added to the `docker` group
 
-# Verify installation
-sudo docker compose version
-```
+After bootstrap:
 
-### 2. Project Setup
-Prepare the directory and environment variables.
+1. Create `/opt/stockcutoff-uat/.env`
+2. Run `docker login ghcr.io` once on the server for private image pulls
+3. Confirm the Cloudflare tunnel token and UAT domain are ready
 
-#### [MODIFY] [.env](file:///Users/ichitunkk/Developer/Repository/Stockcutoff/.env) (Example for Production)
-We will create a production-ready `.env` file on the server.
+## Required Server `.env`
 
 ```env
-DB_PASSWORD=your_secure_db_password
-JWT_SECRET=your_long_random_jwt_secret
-FRONTEND_URL=https://your-domain.com
+DB_PASSWORD=replace-with-strong-random-password
+JWT_SECRET=replace-with-64-char-random-hex-string
+FRONTEND_URL=https://uat.example.com
+PORT=8082
+IMAGE_TAG=bootstrap
 TUNNEL_TOKEN=your_cloudflare_tunnel_token
 ```
 
-### 3. Docker Compose Enhancement
-We will add the `cloudflared` service to the existing `docker-compose.yml` to handle the tunnel connection automatically.
+`IMAGE_TAG` is updated automatically by the workflow during each deploy.
 
-#### [MODIFY] [docker-compose.yml](file:///Users/ichitunkk/Developer/Repository/Stockcutoff/docker-compose.yml)
-Update to include the tunnel service:
+## Required GitHub Actions Secrets
 
-```yaml
-  # ... existing services (postgres, backend, frontend, nginx) ...
+- `UAT_SSH_HOST`
+- `UAT_SSH_PORT`
+- `UAT_SSH_USER`
+- `UAT_SSH_KEY`
+- `UAT_DEPLOY_PATH`
 
-  tunnel:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: tunnel --no-autoupdate run
-    environment:
-      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
-    depends_on:
-      - nginx
-    networks:
-      - app_net
+## Workflow Responsibilities
+
+### Build
+
+- Validate `VERSION`
+- Calculate `SHORT_SHA`, image tag, and git tag
+- Build and push:
+  - `ghcr.io/<owner>/stockcutoff-backend:<image-tag>`
+  - `ghcr.io/<owner>/stockcutoff-frontend:<image-tag>`
+
+### Deploy
+
+- Copy `docker-compose.yml` and `nginx/nginx.conf` to the server
+- Update `IMAGE_TAG` inside the server `.env`
+- Run `docker compose pull`
+- Run `docker compose up -d --remove-orphans`
+- Check `http://127.0.0.1:${PORT}/health`
+
+### Tag
+
+- Create and push an annotated git tag after deploy succeeds
+
+## Verification Checklist
+
+- `docker compose ps` shows all 5 services running
+- `docker compose logs tunnel` shows tunnel connectivity
+- `curl http://127.0.0.1:${PORT}/health` returns success
+- The UAT domain works through Cloudflare
+- First-time seed is run once:
+
+```bash
+docker compose exec backend npm run db:seed
 ```
-
-### 4. Deployment Steps
-
-1.  **Transfer code**: Use `git clone` or `scp` to move the project to the server.
-2.  **Config**: Create `.env` based on `.env.example`.
-3.  **Start**: `sudo docker compose up -d --build`
-4.  **Seed**: `sudo docker compose exec backend npm run db:seed` (if first time).
-
-## Open Questions
-
-- Do you already have a **Cloudflare Tunnel Token**?
-- Would you like me to create a helper shell script (e.g., `setup-server.sh`) in the repository to automate the Ubuntu setup?
-
-## Verification Plan
-
-### Automated Tests
-- `docker compose ps` to ensure all 5 services (postgres, backend, frontend, nginx, tunnel) are running.
-- `docker compose logs tunnel` to check for "Connected" status.
-
-### Manual Verification
-- Access the application via your Cloudflare-assigned domain.
-- Test login with default credentials.
-- Verify image uploads and report generation on the server environment.

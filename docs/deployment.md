@@ -1,68 +1,94 @@
-# Deployment Guide: Stockcutoff
+# Deployment Guide: Stockcutoff UAT
 
-This guide explains how to deploy the **Stockcutoff** project on a fresh Ubuntu server using Docker and Cloudflare Tunnel.
+This guide covers the current UAT deployment flow:
+
+1. Push code to the `uat` branch.
+2. GitHub Actions builds backend/frontend images and pushes them to GHCR.
+3. GitHub Actions SSHes into the UAT server, updates `IMAGE_TAG`, and runs `docker compose pull && docker compose up -d`.
+4. After a successful deploy, GitHub Actions creates a git tag such as `uat-v0.7.0+abcdef123456.142`.
 
 ## Prerequisites
 
--   A fresh Ubuntu 22.04+ server.
--   A Cloudflare account with a domain.
--   A **Tunnel Token** from the [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com/).
+- Ubuntu 24.04+ server reachable over SSH
+- Cloudflare Tunnel token
+- GHCR package access for the server
+- GitHub Actions secrets configured for SSH deploy
 
-## 1. Server Preparation
+## 1. One-Time Server Setup
 
-Run the setup script to install Docker, Docker Compose, and set the system timezone to Bangkok:
-
-```bash
-# Clone the repository
-git clone https://github.com/your-username/stockcutoff.git
-cd stockcutoff
-
-# Run the setup script (Ubuntu ONLY)
-chmod +x scripts/setup-server.sh
-./scripts/setup-server.sh
-```
-
-> [!NOTE]
-> You may need to log out and log back in for the `docker` group changes to take effect.
-
-## 2. Configuration
-
-Create your `.env` file from the example:
+Copy `scripts/setup-server.sh` to the server and run it:
 
 ```bash
-cp .env.example .env
-nano .env
+scp scripts/setup-server.sh fonney-pc:/tmp/setup-server.sh
+ssh fonney-pc 'chmod +x /tmp/setup-server.sh && DEPLOY_PATH=/opt/stockcutoff-uat /tmp/setup-server.sh'
 ```
 
-**Required Fields:**
--   `DB_PASSWORD`: A strong password for your PostgreSQL database.
--   `JWT_SECRET`: A long, random string (e.g., `openssl rand -base64 64`).
--   `FRONTEND_URL`: Your production domain (e.g., `https://stock.yourdomain.com`).
--   `TUNNEL_TOKEN`: The token provided by Cloudflare when you created the tunnel.
+After the script finishes:
 
-## 3. Starting the Services
+- Log out and back in once so the deployment user can run Docker without `sudo`
+- Run `docker login ghcr.io` on the server with a token that can read private packages
 
-Launch all containers in detached mode:
+## 2. Create the Server `.env`
+
+Create `/opt/stockcutoff-uat/.env` on the server:
+
+```env
+DB_PASSWORD=replace-with-strong-random-password
+JWT_SECRET=replace-with-64-char-random-hex-string
+FRONTEND_URL=https://uat.example.com
+PORT=8082
+IMAGE_TAG=bootstrap
+TUNNEL_TOKEN=your_cloudflare_tunnel_token
+```
+
+Notes:
+
+- `IMAGE_TAG` is updated automatically by GitHub Actions on each deploy
+- `PORT` is bound to `127.0.0.1` only; internet traffic should enter through Cloudflare Tunnel
+
+## 3. Configure GitHub Actions Secrets
+
+Set these repository secrets:
+
+- `UAT_SSH_HOST`
+- `UAT_SSH_PORT`
+- `UAT_SSH_USER`
+- `UAT_SSH_KEY`
+- `UAT_DEPLOY_PATH`
+
+Recommended `UAT_DEPLOY_PATH`: `/opt/stockcutoff-uat`
+
+## 4. Versioning
+
+The root `VERSION` file controls the release line used by CI/CD.
+
+- Update `VERSION` manually when you want a new semantic version line
+- A push to `uat` generates an image tag like `0.7.0-uat-abcdef123456.142`
+- After deployment succeeds, the workflow creates a git tag like `uat-v0.7.0+abcdef123456.142`
+
+## 5. First Deploy
+
+Push the deployment changes to `uat`:
 
 ```bash
-sudo docker compose up -d --build
+git push origin uat
 ```
 
-### Initial Database Setup
-
-If this is your first time deploying, seed the database with default accounts:
+On the first successful deploy, seed the database once:
 
 ```bash
-sudo docker compose exec backend npm run db:seed
+ssh fonney-pc 'cd /opt/stockcutoff-uat && docker compose exec backend npm run db:seed'
 ```
 
-## 4. Cloudflare Configuration
+## 6. Verification
 
-In your Cloudflare Zero Trust dashboard, ensure your tunnel is "Healthy".
-Point your domain/subdomain to the **Local Service**: `http://nginx:80`.
+Run these on the server:
 
-## 5. Troubleshooting
+```bash
+cd /opt/stockcutoff-uat
+docker compose ps
+docker compose logs --tail=100 tunnel
+curl http://127.0.0.1:8082/health
+```
 
--   **Check Logs**: `sudo docker compose logs -f`
--   **Check Tunnel**: `sudo docker compose logs -f tunnel`
--   **Rebuild**: `sudo docker compose up -d --build --force-recreate`
+Then verify the UAT domain through Cloudflare.
