@@ -95,7 +95,7 @@ const ISSUE_COLOR: Record<string, string> = {
 
 const fmt = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2 });
 
-type TabId = 'sales' | 'booth' | 'review' | 'errors';
+type TabId = 'all' | 'sales' | 'booth' | 'review' | 'errors';
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -179,7 +179,7 @@ export default function DeptReconcile() {
       const { data } = await client.post(`/dept-reconcile/draft/${id}/resume`);
       setPreview(data);
       setPlatform(data.platform || 'CENTRAL');
-      setActiveTab('sales');
+      setActiveTab('all');
       setExpandedRows(new Set());
     } catch {
       toast.error('ไม่สามารถเรียกคืนฉบับร่างได้');
@@ -208,7 +208,7 @@ export default function DeptReconcile() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setPreview({ ...data, _fileName: file.name });
-      setActiveTab('sales');
+      setActiveTab('all');
       setExpandedRows(new Set());
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'วิเคราะห์ไฟล์ไม่สำเร็จ');
@@ -460,12 +460,13 @@ export default function DeptReconcile() {
           </div>
 
           {/* Tabs */}
-          <div className="bg-white border-b px-5 shrink-0 flex gap-0">
+          <div className="bg-white border-b px-5 shrink-0 flex gap-0 overflow-x-auto">
             {([
-              ['sales',  `✅ ยอดขายหน้าร้าน (${stats!.deptStoreRows})`,          'border-green-500 text-green-700'],
-              ['booth',  `🔵 บูธขายครบ (${stats!.boothCoveredRows ?? 0})`,        'border-blue-500 text-blue-700'],
-              ['review', `⚠️ ต้องตรวจสอบ (${stats!.reviewRows})`,                'border-orange-500 text-orange-700'],
-              ['errors', `🔴 ข้อผิดพลาด (${stats!.errorRows})`,                  'border-red-500 text-red-600'],
+              ['all',    `📋 สรุปทั้งหมด (${stats!.deptStoreRows + (stats!.boothCoveredRows ?? 0)})`, 'border-indigo-500 text-indigo-700'],
+              ['sales',  `✅ ยอดขายหน้าร้าน (${stats!.deptStoreRows})`,                              'border-green-500 text-green-700'],
+              ['booth',  `🔵 บูธขายครบ (${stats!.boothCoveredRows ?? 0})`,                            'border-blue-500 text-blue-700'],
+              ['review', `⚠️ ต้องตรวจสอบ (${stats!.reviewRows})`,                                    'border-orange-500 text-orange-700'],
+              ['errors', `🔴 ข้อผิดพลาด (${stats!.errorRows})`,                                      'border-red-500 text-red-600'],
             ] as const).map(([tab, label, activeClass]) => (
               <button key={tab} onClick={() => setActiveTab(tab as TabId)}
                 className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap
@@ -477,6 +478,75 @@ export default function DeptReconcile() {
 
           {/* Table */}
           <div className="flex-1 overflow-auto bg-gray-50">
+            {activeTab === 'all' && (() => {
+              const allMatched = [
+                ...preview.deptStoreSales.map(r => ({ ...r, _type: 'store' as const })),
+                ...(preview.boothCovered ?? []).map(r => ({ ...r, _type: 'booth' as const, unitPrice: 0 })),
+              ].sort((a, b) => a.date.localeCompare(b.date) || a.branchName.localeCompare(b.branchName) || a.itemName.localeCompare(b.itemName));
+              return (
+                <table className="w-full text-sm">
+                  <thead className="bg-white sticky top-0 shadow-sm">
+                    <tr>
+                      <th className="table-header w-8"></th>
+                      <th className="table-header">วันที่</th>
+                      <th className="table-header">สาขา</th>
+                      <th className="table-header">สินค้า</th>
+                      <th className="table-header text-right">รายงานรวม</th>
+                      <th className="table-header text-right">บูธ POS (หัก)</th>
+                      <th className="table-header text-right">ยอดหน้าร้าน</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {allMatched.length === 0 ? (
+                      <tr><td colSpan={7} className="p-8 text-center text-gray-400">ไม่มีข้อมูล</td></tr>
+                    ) : allMatched.map((row, i) => {
+                      const isBooth = row._type === 'booth';
+                      return (
+                        <tr key={i} className={isBooth ? 'bg-blue-50/30 hover:bg-blue-50/50' : 'hover:bg-green-50/20'}>
+                          <td className="table-cell text-center">
+                            {isBooth
+                              ? <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">บูธ</span>
+                              : <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium">ร้าน</span>}
+                          </td>
+                          <td className="table-cell text-xs font-mono">{row.date}</td>
+                          <td className="table-cell text-xs">
+                            <p className="font-medium">{row.branchName}</p>
+                            <p className="text-gray-400 text-[10px]">{row.branchCode}</p>
+                          </td>
+                          <td className="table-cell text-xs">
+                            <p className="font-medium truncate max-w-[160px]" title={row.itemName}>{row.itemName}</p>
+                            <p className="text-gray-400 font-mono text-[10px]">{row.itemSku} / {row.itemBarcode}</p>
+                          </td>
+                          <td className="table-cell text-right text-xs text-gray-500">
+                            <p>{row.consolidatedQty}</p>
+                            <p>฿{fmt(row.consolidatedAmount)}</p>
+                          </td>
+                          <td className="table-cell text-right text-xs text-blue-500">
+                            {row.boothQty > 0 ? (
+                              <>
+                                <p>-{row.boothQty}</p>
+                                <p>-฿{fmt(row.boothAmount)}</p>
+                              </>
+                            ) : <span className="text-gray-300">—</span>}
+                          </td>
+                          <td className="table-cell text-right text-xs">
+                            {isBooth ? (
+                              <span className="text-blue-600 font-medium">บูธขายครบ ✓</span>
+                            ) : (
+                              <>
+                                <p className="font-bold text-green-700">{row.storeQty} ชิ้น</p>
+                                <p className="font-bold text-green-600">฿{fmt(row.storeAmount)}</p>
+                              </>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              );
+            })()}
+
             {activeTab === 'sales' && (
               <table className="w-full text-sm">
                 <thead className="bg-white sticky top-0 shadow-sm">
