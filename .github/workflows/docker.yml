@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - uat
+      - UAT
 
 concurrency:
   group: uat-deploy
