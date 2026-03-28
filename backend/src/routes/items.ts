@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import prisma from '../lib/prisma';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
+import { logAudit, getClientIp } from '../lib/audit';
 import { upload } from '../middleware/upload';
 import { parseItemExcel } from '../lib/itemParser';
 import multer from 'multer';
@@ -113,6 +114,17 @@ router.post('/', authenticate, requireAdmin, upload.single('image'), async (req:
     const item = await prisma.item.create({
       data: { sku, barcode, name, description, defaultPrice: price, category: category || null, imageUrl },
     });
+
+    // Audit log
+    await logAudit({
+      userId: req.user!.id,
+      action: 'CREATE_ITEM',
+      entity: 'Item',
+      entityId: item.id,
+      ip: getClientIp(req),
+      detail: { sku: item.sku, barcode: item.barcode, name: item.name }
+    });
+
     res.status(201).json(item);
   } catch (err: any) {
     if (err.code === 'P2002') return res.status(400).json({ error: 'SKU หรือบาร์โค้ดซ้ำ' });
@@ -235,6 +247,17 @@ router.put('/:id', authenticate, requireAdmin, upload.single('image'), async (re
         active: active !== undefined ? (active === 'true' || active === true) : undefined,
       },
     });
+
+    // Audit log
+    await logAudit({
+      userId: req.user!.id,
+      action: 'UPDATE_ITEM',
+      entity: 'Item',
+      entityId: item.id,
+      ip: getClientIp(req),
+      detail: { sku: item.sku, barcode: item.barcode, name: item.name }
+    });
+
     res.json(item);
   } catch (err: any) {
     if (err.code === 'P2002') return res.status(400).json({ error: 'บาร์โค้ดซ้ำ กรุณาใช้บาร์โค้ดอื่น' });
@@ -252,6 +275,17 @@ router.delete('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: 
       try { if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath); } catch { /* ignore stale file */ }
     }
     await prisma.item.delete({ where: { id: req.params.id } });
+
+    // Audit log
+    await logAudit({
+      userId: req.user!.id,
+      action: 'DELETE_ITEM',
+      entity: 'Item',
+      entityId: item.id,
+      ip: getClientIp(req),
+      detail: { sku: item.sku, barcode: item.barcode, name: item.name }
+    });
+
     res.json({ message: 'ลบเรียบร้อย' });
   } catch {
     res.status(500).json({ error: 'Server error' });

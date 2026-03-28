@@ -4,6 +4,15 @@ Full-stack Point-of-Sale and inventory management web app for multi-branch retai
 
 ## Changelog
 
+### v1.0.0
+- **Database Management** (SUPER_ADMIN) — export and import the entire PostgreSQL database directly from the admin UI; includes gzip compression and safety confirmation modals.
+- **Comprehensive Audit Logging** — the system now logs almost all administrative actions, including:
+  - Database Export/Import
+  - User Login Success/Failure (Admin & POS)
+  - CRUD operations for Items, Branches, Users, Categories, and Blocked Barcodes
+  - Sales Reconciliation and End-of-Day submissions
+- **Infrastructure** — backend Docker image now includes `postgresql-client` for native database operations.
+
 ### v0.9.0
 - **Security — POS PIN rate limiting** — `/api/auth/pos-login` now enforces 5 attempts per 15 minutes per IP (same policy as admin login); prevents brute-force of 4-digit branch PINs
 - **Security — JWT expiry reduced** — admin tokens `24h` → `1h`; POS tokens `12h` → `8h`

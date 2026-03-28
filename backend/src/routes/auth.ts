@@ -27,6 +27,9 @@ router.post('/login', async (req: Request, res: Response) => {
       { expiresIn: '1h' }
     );
 
+    // Audit log successful login
+    await logAudit({ userId: user.id, action: 'LOGIN_SUCCESS', entity: 'User', ip: getClientIp(req) });
+
     res.json({
       token,
       user: { id: user.id, username: user.username, name: user.name, role: user.role, branchId: user.branchId, branch: user.branch },
@@ -69,6 +72,16 @@ router.post('/pos-login', async (req: Request, res: Response) => {
       getSecret(),
       { expiresIn: '8h' }
     );
+
+    // Audit log POS login
+    await logAudit({
+      userId: posUser.id,
+      action: 'POS_LOGIN_SUCCESS',
+      entity: 'Branch',
+      entityId: branch.id,
+      ip: getClientIp(req),
+      detail: { branch: branch.name }
+    });
 
     res.json({
       token,

@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import prisma from '../lib/prisma';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
+import { logAudit, getClientIp } from '../lib/audit';
 
 const router = Router();
 
@@ -18,6 +19,17 @@ router.post('/', authenticate, requireAdmin, async (req: AuthRequest, res: Respo
     const { name } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'กรุณาระบุชื่อหมวดหมู่' });
     const cat = await prisma.category.create({ data: { name: name.trim() } });
+
+    // Audit log
+    await logAudit({
+      userId: req.user!.id,
+      action: 'CREATE_CATEGORY',
+      entity: 'Category',
+      entityId: cat.id,
+      ip: getClientIp(req),
+      detail: { name: cat.name }
+    });
+
     res.status(201).json(cat);
   } catch (err: any) {
     if (err.code === 'P2002') return res.status(400).json({ error: 'ชื่อหมวดหมู่นี้มีอยู่แล้ว' });
@@ -38,6 +50,16 @@ router.put('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Res
       prisma.category.update({ where: { id: req.params.id }, data: { name: name.trim() } }),
       prisma.item.updateMany({ where: { category: oldCat.name }, data: { category: name.trim() } }),
     ]);
+
+    // Audit log
+    await logAudit({
+      userId: req.user!.id,
+      action: 'UPDATE_CATEGORY',
+      entity: 'Category',
+      entityId: cat.id,
+      ip: getClientIp(req),
+      detail: { before: oldCat.name, after: cat.name }
+    });
 
     res.json(cat);
   } catch (err: any) {
@@ -72,6 +94,17 @@ router.delete('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: 
       prisma.item.updateMany({ where: { category: cat.name }, data: { category: null } }),
       prisma.category.delete({ where: { id: req.params.id } }),
     ]);
+
+    // Audit log
+    await logAudit({
+      userId: req.user!.id,
+      action: 'DELETE_CATEGORY',
+      entity: 'Category',
+      entityId: cat.id,
+      ip: getClientIp(req),
+      detail: { name: cat.name }
+    });
+
     res.json({ message: 'ลบเรียบร้อย' });
   } catch {
     res.status(500).json({ error: 'Server error' });

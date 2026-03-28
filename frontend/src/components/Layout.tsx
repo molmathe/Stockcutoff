@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import {
   ShoppingCart, FileText, LayoutDashboard, Package,
   Building2, Users, BarChart3, LogOut, Menu, X, Tag,
-  FileSpreadsheet, FileUp, FileWarning, ClipboardList, GitMerge, ShieldBan
+  FileSpreadsheet, FileUp, FileWarning, ClipboardList, GitMerge, ShieldBan, Database
 } from 'lucide-react';
 
 export default function Layout() {
@@ -32,6 +32,7 @@ export default function Layout() {
         { to: '/admin/dept-reconcile', icon: <GitMerge size={16} />,    label: 'คัดแยกยอดขายหน้าร้าน',       indent: true  },
         { to: '/admin/unresolved-sales', icon: <FileWarning size={18} />, label: 'ยอดขายตกหล่น' },
         { to: '/admin/audit-logs',     icon: <ClipboardList size={18} />, label: 'ประวัติการใช้งาน' },
+        { to: '/admin/database',       icon: <Database size={18} />,      label: 'จัดการฐานข้อมูล' },
       ] : []),
     ] : []),
   ];

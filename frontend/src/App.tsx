@@ -19,6 +19,7 @@ const SalesManager = lazy(() => import('./pages/admin/SalesManager'));
 const UnresolvedSales = lazy(() => import('./pages/admin/UnresolvedSales').then(m => ({ default: m.UnresolvedSales })));
 const AuditLogs = lazy(() => import('./pages/admin/AuditLogs'));
 const BlockedBarcodes = lazy(() => import('./pages/admin/BlockedBarcodes'));
+const Database = lazy(() => import('./pages/admin/Database'));
 
 const Loader = () => (
   <div className="flex h-full items-center justify-center text-gray-400 text-sm">กำลังโหลด...</div>
@@ -60,6 +61,7 @@ function AppRoutes() {
           <Route path="admin/unresolved-sales" element={<Guard roles={['SUPER_ADMIN']}><UnresolvedSales /></Guard>} />
           <Route path="admin/audit-logs" element={<Guard roles={['SUPER_ADMIN']}><AuditLogs /></Guard>} />
           <Route path="admin/blocked-barcodes" element={<Guard roles={['SUPER_ADMIN']}><BlockedBarcodes /></Guard>} />
+          <Route path="admin/database" element={<Guard roles={['SUPER_ADMIN']}><Database /></Guard>} />
         </Route>
       </Routes>
     </Suspense>

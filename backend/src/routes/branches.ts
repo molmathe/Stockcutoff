@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import prisma from '../lib/prisma';
 import multer from 'multer';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
+import { logAudit, getClientIp } from '../lib/audit';
 import { parseBranchExcel } from '../lib/branchParser';
 
 const router = Router();
@@ -113,6 +114,17 @@ router.post('/', authenticate, requireAdmin, async (req: AuthRequest, res: Respo
       data.pincode = String(pincode).trim();
     }
     const branch = await prisma.branch.create({ data });
+
+    // Audit log
+    await logAudit({
+      userId: req.user!.id,
+      action: 'CREATE_BRANCH',
+      entity: 'Branch',
+      entityId: branch.id,
+      ip: getClientIp(req),
+      detail: { name: branch.name, code: branch.code }
+    });
+
     res.status(201).json(safeBranch(branch));
   } catch (err: any) {
     if (err.code === 'P2002') {
@@ -144,6 +156,17 @@ router.put('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Res
     }
 
     const branch = await prisma.branch.update({ where: { id: req.params.id }, data });
+
+    // Audit log
+    await logAudit({
+      userId: req.user!.id,
+      action: 'UPDATE_BRANCH',
+      entity: 'Branch',
+      entityId: branch.id,
+      ip: getClientIp(req),
+      detail: { name: branch.name, code: branch.code }
+    });
+
     res.json(safeBranch(branch));
   } catch (err: any) {
     if (err.code === 'P2002') {
@@ -166,9 +189,23 @@ router.delete('/bulk', authenticate, requireAdmin, async (req: AuthRequest, res:
 });
 
 // DELETE single
-router.delete('/:id', authenticate, requireAdmin, async (req, res: Response) => {
+router.delete('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
+    const branch = await prisma.branch.findUnique({ where: { id: req.params.id } });
+    if (!branch) return res.status(404).json({ error: 'ไม่พบสาขา' });
+
     await prisma.branch.delete({ where: { id: req.params.id } });
+
+    // Audit log
+    await logAudit({
+      userId: req.user!.id,
+      action: 'DELETE_BRANCH',
+      entity: 'Branch',
+      entityId: branch.id,
+      ip: getClientIp(req),
+      detail: { name: branch.name, code: branch.code }
+    });
+
     res.json({ message: 'ลบเรียบร้อย' });
   } catch {
     res.status(500).json({ error: 'Server error' });

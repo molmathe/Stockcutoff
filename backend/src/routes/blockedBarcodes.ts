@@ -3,6 +3,7 @@ import multer from 'multer';
 import ExcelJS from 'exceljs';
 import prisma from '../lib/prisma';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
+import { logAudit, getClientIp } from '../lib/audit';
 
 const router = Router();
 
@@ -41,6 +42,17 @@ router.post('/', authenticate, requireAdmin, async (req: AuthRequest, res: Respo
     const row = await prisma.blockedBarcode.create({
       data: { barcode: barcode.trim(), reason: reason?.trim() || null, createdBy: actor?.name ?? req.user!.id },
     });
+
+    // Audit log
+    await logAudit({
+      userId: req.user!.id,
+      action: 'BLOCK_BARCODE',
+      entity: 'BlockedBarcode',
+      entityId: row.id,
+      ip: getClientIp(req),
+      detail: { barcode: row.barcode, reason: row.reason }
+    });
+
     res.status(201).json(row);
   } catch (err: any) {
     if (err.code === 'P2002') return res.status(400).json({ error: 'บาร์โค้ดนี้มีอยู่ในรายการแล้ว' });
@@ -78,9 +90,23 @@ router.delete('/bulk', authenticate, requireAdmin, async (req: AuthRequest, res:
 });
 
 // DELETE single
-router.delete('/:id', authenticate, requireAdmin, async (req, res: Response) => {
+router.delete('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
+    const row = await prisma.blockedBarcode.findUnique({ where: { id: req.params.id } });
+    if (!row) return res.status(404).json({ error: 'ไม่พบรายการ' });
+
     await prisma.blockedBarcode.delete({ where: { id: req.params.id } });
+
+    // Audit log
+    await logAudit({
+      userId: req.user!.id,
+      action: 'UNBLOCK_BARCODE',
+      entity: 'BlockedBarcode',
+      entityId: row.id,
+      ip: getClientIp(req),
+      detail: { barcode: row.barcode }
+    });
+
     res.json({ message: 'ลบเรียบร้อย' });
   } catch (err: any) {
     if (err.code === 'P2025') return res.status(404).json({ error: 'ไม่พบรายการ' });
