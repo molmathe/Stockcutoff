@@ -1,8 +1,9 @@
 import prisma from './prisma';
+import { Prisma } from '@prisma/client';
 import { Request } from 'express';
 
 interface AuditParams {
-  userId: string;
+  userId?: string | null;
   action: string;
   entity: string;
   entityId?: string;
@@ -12,7 +13,16 @@ interface AuditParams {
 
 export const logAudit = async (params: AuditParams) => {
   try {
-    await prisma.auditLog.create({ data: params });
+    await prisma.auditLog.create({
+      data: {
+        userId: params.userId ?? undefined,
+        action: params.action,
+        entity: params.entity,
+        entityId: params.entityId,
+        detail: params.detail,
+        ip: params.ip,
+      } as Prisma.AuditLogUncheckedCreateInput,
+    });
   } catch (e) {
     console.error('Audit log write failed:', e);
   }

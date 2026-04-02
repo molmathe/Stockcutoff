@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import {
   ShoppingCart, FileText, LayoutDashboard, Package,
   Building2, Users, BarChart3, LogOut, Menu, X, Tag,
-  FileSpreadsheet, FileUp, FileWarning, ClipboardList, GitMerge, ShieldBan, Database
+  FileSpreadsheet, FileUp, FileWarning, ClipboardList, GitMerge, ShieldBan, Database, CalendarDays
 } from 'lucide-react';
 
 export default function Layout() {
@@ -25,8 +25,10 @@ export default function Layout() {
       ] : []),
       { to: '/admin/categories', icon: <Tag size={18} />, label: 'จัดการหมวดหมู่' },
       { to: '/admin/branches', icon: <Building2 size={18} />, label: 'จัดการสาขา' },
+      { to: '/admin/branch-kpi', icon: <BarChart3 size={16} />, label: 'KPI สาขา', indent: true },
       { to: '/admin/users', icon: <Users size={18} />, label: 'จัดการผู้ใช้' },
       { to: '/admin/reports', icon: <BarChart3 size={18} />, label: 'รายงานยอดขาย' },
+      { to: '/admin/calendar', icon: <CalendarDays size={18} />, label: 'ปฏิทินการส่งยอด' },
       ...(user?.role === 'SUPER_ADMIN' ? [
         { to: '/admin/import-sales',   icon: <FileUp size={18} />,      label: 'นำเข้าข้อมูลการขาย',         indent: false },
         { to: '/admin/dept-reconcile', icon: <GitMerge size={16} />,    label: 'คัดแยกยอดขายหน้าร้าน',       indent: true  },

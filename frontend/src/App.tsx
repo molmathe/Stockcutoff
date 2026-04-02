@@ -20,6 +20,8 @@ const UnresolvedSales = lazy(() => import('./pages/admin/UnresolvedSales').then(
 const AuditLogs = lazy(() => import('./pages/admin/AuditLogs'));
 const BlockedBarcodes = lazy(() => import('./pages/admin/BlockedBarcodes'));
 const Database = lazy(() => import('./pages/admin/Database'));
+const CalendarDashboard = lazy(() => import('./pages/admin/CalendarDashboard'));
+const BranchKPI = lazy(() => import('./pages/admin/BranchKPI'));
 
 const Loader = () => (
   <div className="flex h-full items-center justify-center text-gray-400 text-sm">กำลังโหลด...</div>
@@ -62,6 +64,8 @@ function AppRoutes() {
           <Route path="admin/audit-logs" element={<Guard roles={['SUPER_ADMIN']}><AuditLogs /></Guard>} />
           <Route path="admin/blocked-barcodes" element={<Guard roles={['SUPER_ADMIN']}><BlockedBarcodes /></Guard>} />
           <Route path="admin/database" element={<Guard roles={['SUPER_ADMIN']}><Database /></Guard>} />
+          <Route path="admin/calendar" element={<Guard roles={['SUPER_ADMIN', 'BRANCH_ADMIN']}><CalendarDashboard /></Guard>} />
+          <Route path="admin/branch-kpi" element={<Guard roles={['SUPER_ADMIN', 'BRANCH_ADMIN']}><BranchKPI /></Guard>} />
         </Route>
       </Routes>
     </Suspense>

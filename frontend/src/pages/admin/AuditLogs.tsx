@@ -12,7 +12,7 @@ interface AuditLog {
   detail?: Record<string, any>;
   ip?: string;
   createdAt: string;
-  user: { id: string; name: string; username: string; role: string };
+  user: { id: string; name: string; username: string; role: string } | null;
 }
 
 interface BillItemSnapshot {
@@ -26,23 +26,27 @@ interface BillItemSnapshot {
 }
 
 const actionLabel: Record<string, string> = {
-  CREATE_BILL: 'สร้างบิล',
-  EDIT_BILL: 'แก้ไขบิล',
-  CANCEL_BILL: 'ยกเลิกบิล',
-  SUBMIT_DAY: 'ปิดวัน',
-  DEPT_RECONCILE: 'Dept Reconcile',
-  LOGIN: 'เข้าสู่ระบบ',
-  POS_LOGIN: 'เข้าสู่ระบบ POS',
+  CREATE_BILL:       'สร้างบิล',
+  EDIT_BILL:         'แก้ไขบิล',
+  CANCEL_BILL:       'ยกเลิกบิล',
+  SUBMIT_DAY:        'ปิดวัน',
+  DEPT_RECONCILE:    'Dept Reconcile',
+  LOGIN_SUCCESS:     'เข้าสู่ระบบสำเร็จ',
+  LOGIN_FAILED:      'เข้าสู่ระบบล้มเหลว',
+  POS_LOGIN_SUCCESS: 'เข้าสู่ระบบ POS สำเร็จ',
+  POS_LOGIN_FAILED:  'เข้าสู่ระบบ POS ล้มเหลว',
 };
 
 const actionColor: Record<string, string> = {
-  CREATE_BILL: 'bg-blue-100 text-blue-700',
-  EDIT_BILL: 'bg-yellow-100 text-yellow-700',
-  CANCEL_BILL: 'bg-red-100 text-red-700',
-  SUBMIT_DAY: 'bg-green-100 text-green-700',
-  DEPT_RECONCILE: 'bg-indigo-100 text-indigo-700',
-  LOGIN: 'bg-gray-100 text-gray-600',
-  POS_LOGIN: 'bg-purple-100 text-purple-700',
+  CREATE_BILL:       'bg-blue-100 text-blue-700',
+  EDIT_BILL:         'bg-yellow-100 text-yellow-700',
+  CANCEL_BILL:       'bg-red-100 text-red-700',
+  SUBMIT_DAY:        'bg-green-100 text-green-700',
+  DEPT_RECONCILE:    'bg-indigo-100 text-indigo-700',
+  LOGIN_SUCCESS:     'bg-gray-100 text-gray-600',
+  LOGIN_FAILED:      'bg-red-100 text-red-600',
+  POS_LOGIN_SUCCESS: 'bg-purple-100 text-purple-700',
+  POS_LOGIN_FAILED:  'bg-red-100 text-red-600',
 };
 
 const fmt = (n: number) => `฿${n.toLocaleString('th-TH', { minimumFractionDigits: 2 })}`;
@@ -313,8 +317,8 @@ export default function AuditLogs() {
               </div>
               {/* User */}
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-800 truncate">{log.user.name}</p>
-                <p className="text-[10px] text-gray-400">{log.user.username} · {log.user.role}</p>
+                <p className="text-sm font-medium text-gray-800 truncate">{log.user?.name ?? 'ระบบ'}</p>
+                <p className="text-[10px] text-gray-400">{log.user ? `${log.user.username} · ${log.user.role}` : 'system'}</p>
               </div>
               {/* Action badge */}
               <span className={`shrink-0 inline-block px-2 py-0.5 rounded text-xs font-medium ${actionColor[log.action] ?? 'bg-gray-100 text-gray-600'}`}>
@@ -338,8 +342,8 @@ export default function AuditLogs() {
                 {/* Header info */}
                 <div className="flex flex-wrap gap-4 text-xs text-gray-500 mb-3">
                   <span><span className="font-medium text-gray-700">เวลา:</span> {format(new Date(log.createdAt), 'dd/MM/yyyy HH:mm:ss')}</span>
-                  <span><span className="font-medium text-gray-700">ผู้ใช้:</span> {log.user.name} ({log.user.username})</span>
-                  <span><span className="font-medium text-gray-700">บทบาท:</span> {log.user.role}</span>
+                  <span><span className="font-medium text-gray-700">ผู้ใช้:</span> {log.user ? `${log.user.name} (${log.user.username})` : 'ระบบ'}</span>
+                  <span><span className="font-medium text-gray-700">บทบาท:</span> {log.user?.role ?? '—'}</span>
                   <span><span className="font-medium text-gray-700">IP:</span> {log.ip || '—'}</span>
                   {log.entityId && <span><span className="font-medium text-gray-700">Entity ID:</span> {log.entityId}</span>}
                 </div>

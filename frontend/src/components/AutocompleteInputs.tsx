@@ -1,11 +1,128 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { ChevronDown, X } from 'lucide-react';
 import client from '../api/client';
 
 interface AutoInputProps {
   defaultValue: string;
   onCommit: (val: string) => void;
 }
+
+// ─── BranchCombobox ──────────────────────────────────────────────────────────
+// ID-based searchable branch selector for forms and filters.
+
+interface BranchComboboxProps {
+  value: string;           // branch ID ('' = none selected)
+  onChange: (id: string) => void;
+  branches: { id: string; name: string; code: string }[];
+  placeholder?: string;
+  allLabel?: string;       // label for the "no selection" option, e.g. "ทุกสาขา"
+}
+
+export const BranchCombobox: React.FC<BranchComboboxProps> = ({
+  value, onChange, branches, placeholder = '— เลือกสาขา —', allLabel,
+}) => {
+  const selected = branches.find(b => b.id === value) ?? null;
+  const [query,  setQuery]  = useState('');
+  const [open,   setOpen]   = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const filtered = query.trim()
+    ? branches.filter(b =>
+        b.name.toLowerCase().includes(query.toLowerCase()) ||
+        b.code.toLowerCase().includes(query.toLowerCase())
+      ).slice(0, 8)
+    : branches.slice(0, 8);
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const select = (id: string) => {
+    onChange(id);
+    setOpen(false);
+    setQuery('');
+  };
+
+  const clear = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onChange('');
+    setQuery('');
+  };
+
+  return (
+    <div ref={containerRef} className="relative">
+      {/* Trigger */}
+      <button
+        type="button"
+        onClick={() => { setOpen(o => !o); setTimeout(() => (containerRef.current?.querySelector('input') as HTMLInputElement)?.focus(), 50); }}
+        className="input w-full flex items-center justify-between text-left gap-2 pr-2"
+      >
+        <span className={`flex-1 truncate text-sm ${selected ? 'text-gray-800' : 'text-gray-400'}`}>
+          {selected ? `${selected.name} (${selected.code})` : (allLabel ?? placeholder)}
+        </span>
+        <span className="flex items-center gap-1 shrink-0">
+          {value && (
+            <span onMouseDown={clear} className="text-gray-400 hover:text-gray-600 cursor-pointer p-0.5 rounded">
+              <X size={13} />
+            </span>
+          )}
+          <ChevronDown size={14} className={`text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+        </span>
+      </button>
+
+      {/* Dropdown */}
+      {open && (
+        <div className="absolute z-50 left-0 top-full mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-xl overflow-hidden">
+          {/* Search input */}
+          <div className="p-2 border-b border-gray-100">
+            <input
+              type="text"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="พิมพ์ชื่อหรือรหัสสาขา..."
+              className="w-full text-sm px-2.5 py-1.5 border border-gray-200 rounded-md outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+              autoFocus
+            />
+          </div>
+          <ul className="max-h-52 overflow-y-auto">
+            {/* All-branches option */}
+            {allLabel && (
+              <li
+                onMouseDown={() => select('')}
+                className={`px-3 py-2 cursor-pointer text-sm hover:bg-blue-50 text-gray-500 ${value === '' ? 'bg-blue-50 font-medium text-blue-700' : ''}`}
+              >
+                {allLabel}
+              </li>
+            )}
+            {filtered.length === 0 ? (
+              <li className="px-3 py-3 text-sm text-gray-400 text-center">ไม่พบสาขา</li>
+            ) : (
+              filtered.map(b => (
+                <li
+                  key={b.id}
+                  onMouseDown={() => select(b.id)}
+                  className={`flex items-center justify-between px-3 py-2 cursor-pointer text-sm hover:bg-blue-50 ${b.id === value ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-800'}`}
+                >
+                  <span className="truncate">{b.name}</span>
+                  <span className="text-xs text-gray-400 ml-2 shrink-0">{b.code}</span>
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // ─── BranchAutoInput ────────────────────────────────────────────────────────
 

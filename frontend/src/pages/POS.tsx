@@ -8,6 +8,7 @@ import {
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import BarcodeScanner from '../components/BarcodeScanner';
+import { BranchCombobox } from '../components/AutocompleteInputs';
 import type { Item, Branch, TodaySummary, Bill } from '../types';
 
 interface CartItem {
@@ -54,6 +55,13 @@ export default function POS() {
   const [selectedSuggestion, setSelectedSuggestion] = useState(-1);
   const suggestDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastKeyTimeRef = useRef<number>(0);
+  const isFromScannerRef = useRef<boolean>(false);
+
+  // Search popup state
+  const [showSearchModal, setShowSearchModal] = useState(false);
+  const [searchModalResults, setSearchModalResults] = useState<Item[]>([]);
+  const [searchModalLoading, setSearchModalLoading] = useState(false);
+  const [searchModalTerm, setSearchModalTerm] = useState('');
 
   // Modal states
   const [notFoundBarcode, setNotFoundBarcode] = useState<string | null>(null);
@@ -102,6 +110,27 @@ export default function POS() {
     }
   }, []);
 
+  const openSearchPopup = useCallback(async (query: string) => {
+    if (!query.trim()) return;
+    setShowSuggestions(false);
+    setSuggestions([]);
+    setSearchModalTerm(query.trim());
+    setSearchModalResults([]);
+    setShowSearchModal(true);
+    setSearchModalLoading(true);
+    try {
+      const { data } = await client.get('/items', {
+        params: { search: query.trim(), active: 'true', page: 1, limit: 50 },
+      });
+      const items: Item[] = Array.isArray(data) ? data : (data.items ?? []);
+      setSearchModalResults(items);
+    } catch {
+      setSearchModalResults([]);
+    } finally {
+      setSearchModalLoading(false);
+    }
+  }, []);
+
   const loadSummary = async () => {
     setLoadingSummary(true);
     try {
@@ -124,15 +153,19 @@ export default function POS() {
       addToCart(item);
       setBarcodeInput('');
     } catch (err: any) {
-      setBarcodeInput('');
       if (err.response?.status === 403 && err.response?.data?.blocked) {
+        setBarcodeInput('');
         setBlockedBarcode(code.trim());
+      } else if (!isFromScannerRef.current) {
+        // Manual typing — open popup so user can pick from partial matches
+        openSearchPopup(code.trim());
       } else {
+        setBarcodeInput('');
         setNotFoundBarcode(code.trim());
       }
     }
     inputRef.current?.focus();
-  }, []);
+  }, [openSearchPopup]);
 
   const addToCart = (item: Item) => {
     setCartItems((prev) => {
@@ -164,7 +197,8 @@ export default function POS() {
     lastKeyTimeRef.current = now;
 
     // If typing fast (< 50ms gap = likely scanner), don't show suggestions
-    if (timeSinceLastKey < 50 && val.length > 1) return;
+    isFromScannerRef.current = timeSinceLastKey < 50 && val.length > 1;
+    if (isFromScannerRef.current) return;
 
     if (suggestDebounceRef.current) clearTimeout(suggestDebounceRef.current);
     if (val.trim().length >= 2) {
@@ -348,6 +382,61 @@ export default function POS() {
             >
               ปิด
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Search Results Modal ===== */}
+      {showSearchModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col" style={{ maxHeight: '85vh' }}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">ผลการค้นหาสินค้า</h2>
+                <p className="text-sm text-gray-400 mt-0.5">ค้นหา: <span className="font-mono text-gray-600">{searchModalTerm}</span></p>
+              </div>
+              <button onClick={() => { setShowSearchModal(false); setTimeout(() => inputRef.current?.focus(), 50); }}
+                className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1 px-4 py-3">
+              {searchModalLoading ? (
+                <div className="flex items-center justify-center py-16">
+                  <RefreshCw size={24} className="animate-spin text-blue-400" />
+                </div>
+              ) : searchModalResults.length === 0 ? (
+                <div className="text-center py-16 text-gray-400">
+                  <Search size={40} className="mx-auto mb-3 opacity-30" />
+                  <p className="font-medium">ไม่พบสินค้า</p>
+                  <p className="text-sm mt-1">ลองค้นหาด้วย SKU หรือบาร์โค้ดอื่น</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-400 mb-3">พบ {searchModalResults.length} รายการ — คลิกเพื่อเพิ่มลงตะกร้า</p>
+                  {searchModalResults.map((item) => (
+                    <button key={item.id}
+                      onClick={() => { addToCart(item); setShowSearchModal(false); setBarcodeInput(''); setTimeout(() => inputRef.current?.focus(), 50); }}
+                      className="w-full flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:border-blue-300 hover:bg-blue-50 transition-colors text-left">
+                      {item.imageUrl ? (
+                        <img src={item.imageUrl} alt="" className="w-12 h-12 rounded-lg object-cover shrink-0" />
+                      ) : (
+                        <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center text-[10px] text-gray-400 shrink-0 font-mono">{item.sku.slice(0, 4)}</div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-gray-900 truncate">{item.name}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">SKU: {item.sku}</p>
+                        <p className="text-xs text-gray-400">Barcode: {item.barcode}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="font-bold text-blue-700 text-base">฿{parseFloat(String(item.defaultPrice)).toLocaleString('th-TH')}</p>
+                        <p className="text-[11px] text-blue-400 mt-0.5">แตะเพื่อเพิ่ม</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

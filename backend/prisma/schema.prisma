@@ -53,8 +53,8 @@ model User {
 
 model AuditLog {
   id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
   action    String
   entity    String
   entityId  String?
@@ -84,6 +84,7 @@ model Branch {
   updatedAt         DateTime   @updatedAt
   users             User[]
   bills             Bill[]
+  targets           BranchTarget[]
 
   @@index([deletedAt])
 }
@@ -198,4 +199,18 @@ model UnresolvedSale {
 
   @@index([status])
   @@index([userId])
+}
+
+model BranchTarget {
+  id        String   @id @default(cuid())
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id])
+  year      Int
+  month     Int
+  target    Decimal  @db.Decimal(12, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([branchId, year, month])
+  @@index([year, month])
 }

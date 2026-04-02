@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { FileText, ChevronDown, ChevronUp, X, Pencil, Plus, Trash2 } from 'lucide-react';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { BranchCombobox } from '../components/AutocompleteInputs';
 import type { Bill, Branch } from '../types';
 
 const statusBadge = (s: string) => {
@@ -206,10 +207,12 @@ export default function Bills() {
           {isAdmin && (
             <div>
               <label className="label">สาขา</label>
-              <select value={filters.branchId} onChange={(e) => setFilters((f) => ({ ...f, branchId: e.target.value }))} className="input">
-                <option value="">ทุกสาขา</option>
-                {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
+              <BranchCombobox
+                value={filters.branchId}
+                onChange={(id) => setFilters((f) => ({ ...f, branchId: id }))}
+                branches={branches}
+                allLabel="ทุกสาขา"
+              />
             </div>
           )}
         </div>
