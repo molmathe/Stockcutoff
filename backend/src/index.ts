@@ -43,22 +43,6 @@ const PORT = process.env.PORT || 3001;
 app.set('trust proxy', 1);
 
 // ── Rate limiters ────────────────────────────────────────────────────────────
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'พยายามเข้าสู่ระบบมากเกินไป กรุณารอ 15 นาทีแล้วลองใหม่' },
-});
-
-const posLoginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'พยายามเข้าสู่ระบบมากเกินไป กรุณารอ 15 นาทีแล้วลองใหม่' },
-});
-
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 300,
@@ -76,8 +60,6 @@ app.use(express.json({ limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // ── Routes ───────────────────────────────────────────────────────────────────
-app.use('/api/auth/login', loginLimiter);
-app.use('/api/auth/pos-login', posLoginLimiter);
 app.use('/api', apiLimiter);
 
 app.use('/api/auth', authRoutes);

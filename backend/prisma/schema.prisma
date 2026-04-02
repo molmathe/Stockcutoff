@@ -138,16 +138,16 @@ model Bill {
 }
 
 model BillItem {
-  id       String  @id @default(cuid())
-  billId   String
-  bill     Bill    @relation(fields: [billId], references: [id], onDelete: Cascade)
-  itemId   String
-  item     Item    @relation(fields: [itemId], references: [id])
-  quantity   Int     @default(1)
-  price      Decimal @db.Decimal(10, 2)
-  discount   Decimal @db.Decimal(10, 2) @default(0)
-  subtotal   Decimal @db.Decimal(10, 2)
-  netSubtotal Decimal @db.Decimal(10, 2) @default(0)
+  id             String  @id @default(cuid())
+  billId         String
+  bill           Bill    @relation(fields: [billId], references: [id], onDelete: Cascade)
+  itemId         String
+  item           Item    @relation(fields: [itemId], references: [id])
+  quantity       Int     @default(1)
+  price          Decimal @db.Decimal(10, 2)
+  discount       Decimal @db.Decimal(10, 2) @default(0)  // Manual per-line discount
+  globalDiscount Decimal @db.Decimal(10, 2) @default(0)  // Pro-rata share of global bill discount
+  subtotal       Decimal @db.Decimal(10, 2)               // price*qty - discount - globalDiscount (net)
 
   @@index([billId])
   @@index([itemId])
@@ -197,17 +197,17 @@ model UnresolvedSale {
   user         User      @relation(fields: [userId], references: [id])
   platform     String
   fileName     String
-  
+
   saleDate     String?
   rawDate      String?
   rawBranch    String?
   rawItem      String?
   qty          Int
   price        Decimal   @db.Decimal(10,2)
-  
+
   status       String    @default("PENDING")
   errors       Json
-  
+
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 

@@ -301,13 +301,21 @@ export default function Bills() {
                         <tr className="text-xs text-gray-400 border-b">
                           <th className="text-left py-2">สินค้า</th>
                           <th className="text-right py-2">จำนวน</th>
-                          <th className="text-right py-2">ราคา</th>
-                          <th className="text-right py-2">ส่วนลด</th>
-                          <th className="text-right py-2">สุทธิ/รายการ</th>
+                          <th className="text-right py-2">ราคา/หน่วย</th>
+                          <th className="text-right py-2">ส่วนลดรายการ</th>
+                          {Number(bill.discountPct) > 0 && <th className="text-right py-2">ส่วนลดบิล ({Number(bill.discountPct).toFixed(0)}%)</th>}
+                          <th className="text-right py-2">ราคาสุทธิ/หน่วย</th>
+                          <th className="text-right py-2">รวม</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {bill.items.map((bi) => (
+                        {bill.items.map((bi) => {
+                          const globalDisc = Number(bi.globalDiscount ?? 0);
+                          const manualDisc = Number(bi.discount);
+                          const netUnitPrice = bi.quantity > 0
+                            ? Math.round((Number(bi.subtotal) / bi.quantity) * 100) / 100
+                            : 0;
+                          return (
                           <tr key={bi.id} className="border-b border-gray-100">
                             <td className="py-2">
                               <div className="flex items-center gap-2">
@@ -326,24 +334,31 @@ export default function Bills() {
                             </td>
                             <td className="text-right py-2">{bi.quantity}</td>
                             <td className="text-right py-2">฿{Number(bi.price).toFixed(2)}</td>
-                            <td className="text-right py-2 text-orange-600">{Number(bi.discount) > 0 ? `-฿${Number(bi.discount).toFixed(2)}` : '-'}</td>
-                            <td className="text-right py-2 font-medium">฿{Number(bi.netSubtotal ?? bi.subtotal).toFixed(2)}</td>
+                            <td className="text-right py-2 text-orange-600">{manualDisc > 0 ? `-฿${manualDisc.toFixed(2)}` : '-'}</td>
+                            {Number(bill.discountPct) > 0 && (
+                              <td className="text-right py-2 text-purple-600">{globalDisc > 0 ? `-฿${globalDisc.toFixed(2)}` : '-'}</td>
+                            )}
+                            <td className="text-right py-2 text-blue-700 font-medium">฿{netUnitPrice.toFixed(2)}</td>
+                            <td className="text-right py-2 font-medium">฿{Number(bi.subtotal).toFixed(2)}</td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                       <tfoot>
                         <tr>
-                          <td colSpan={4} className="text-right py-2 font-medium text-gray-500 pr-2">ยอดรวมก่อนหักส่วนลด</td>
+                          <td colSpan={Number(bill.discountPct) > 0 ? 6 : 5} className="text-right py-2 font-medium text-gray-500 pr-2">ยอดรวมก่อนหักส่วนลดบิล</td>
                           <td className="text-right py-2 font-medium">฿{Number(bill.subtotal).toFixed(2)}</td>
                         </tr>
                         {Number(bill.discount) > 0 && (
                           <tr>
-                            <td colSpan={4} className="text-right py-1 text-orange-600 pr-2">ส่วนลดบิล</td>
-                            <td className="text-right py-1 text-orange-600">-฿{Number(bill.discount).toFixed(2)}</td>
+                            <td colSpan={Number(bill.discountPct) > 0 ? 6 : 5} className="text-right py-1 text-purple-600 pr-2">
+                              ส่วนลดบิลรวม{Number(bill.discountPct) > 0 ? ` (${Number(bill.discountPct).toFixed(0)}% กระจายแล้ว)` : ''}
+                            </td>
+                            <td className="text-right py-1 text-purple-600">-฿{Number(bill.discount).toFixed(2)}</td>
                           </tr>
                         )}
                         <tr className="border-t">
-                          <td colSpan={4} className="text-right py-2 font-bold pr-2">ยอดสุทธิ</td>
+                          <td colSpan={Number(bill.discountPct) > 0 ? 6 : 5} className="text-right py-2 font-bold pr-2">ยอดสุทธิ</td>
                           <td className="text-right py-2 font-bold text-blue-600">฿{Number(bill.total).toFixed(2)}</td>
                         </tr>
                       </tfoot>

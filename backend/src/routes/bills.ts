@@ -8,30 +8,37 @@ const router = Router();
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-// Distribute bill-level discount pro-rata across items and stamp netSubtotal on each.
-// Last item absorbs any ±0.01 rounding remainder so sum(netSubtotal) === billTotal exactly.
-const distributeDiscount = (
-  items: { subtotal: number; [k: string]: any }[],
-  totalDiscount: number,
-  billTotal: number,
-): void => {
-  if (items.length === 0) return;
-  if (totalDiscount === 0) {
-    items.forEach(i => { i.netSubtotal = i.subtotal; });
-    return;
+/**
+ * Distributes a global discount amount pro-rata across line items.
+ * Each item receives: (itemSubtotal / totalSubtotal) * globalDiscountAmt
+ * Rounding remainders ("penny rule") are applied to the largest line item.
+ *
+ * @param lineSubtotals - net subtotal for each line AFTER manual item discounts
+ * @param globalDiscountAmt - total bill-level discount to distribute
+ * @returns allocated globalDiscount per line index
+ */
+function distributeGlobalDiscount(lineSubtotals: number[], globalDiscountAmt: number): number[] {
+  if (globalDiscountAmt <= 0 || lineSubtotals.length === 0) {
+    return lineSubtotals.map(() => 0);
   }
-  const totalSub = items.reduce((s, i) => s + i.subtotal, 0);
-  let sumNet = 0;
-  for (let idx = 0; idx < items.length; idx++) {
-    if (idx === items.length - 1) {
-      items[idx].netSubtotal = round2(billTotal - sumNet);
-    } else {
-      const proRata = totalSub > 0 ? round2(items[idx].subtotal / totalSub * totalDiscount) : 0;
-      items[idx].netSubtotal = round2(items[idx].subtotal - proRata);
-      sumNet = round2(sumNet + items[idx].netSubtotal);
+  const total = lineSubtotals.reduce((s, v) => s + v, 0);
+  if (total <= 0) return lineSubtotals.map(() => 0);
+
+  const allocated = lineSubtotals.map((sub) => round2((sub / total) * globalDiscountAmt));
+  const allocatedSum = round2(allocated.reduce((s, v) => s + v, 0));
+  const remainder = round2(globalDiscountAmt - allocatedSum);
+
+  // Penny rule: apply rounding difference to the largest line item
+  if (remainder !== 0) {
+    let maxIdx = 0;
+    for (let i = 1; i < lineSubtotals.length; i++) {
+      if (lineSubtotals[i] > lineSubtotals[maxIdx]) maxIdx = i;
     }
+    allocated[maxIdx] = round2(allocated[maxIdx] + remainder);
   }
-};
+
+  return allocated;
+}
 
 const generateBillNumber = () => {
   const d = new Date();
@@ -150,7 +157,7 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
     }
 
     let subtotal = 0;
-    const billItems = (items as any[]).map((it, idx) => {
+    const rawItems = (items as any[]).map((it, idx) => {
       const qty = Number(it.quantity);
       const price = Number(it.price);
       if (!Number.isFinite(qty) || qty <= 0 || !Number.isInteger(qty)) {
@@ -160,16 +167,29 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
         throw Object.assign(new Error(`รายการที่ ${idx + 1}: ราคาไม่ถูกต้อง`), { status: 400 });
       }
       const itemDiscount = Math.min(Math.max(0, round2(Number(it.discount) || 0)), round2(price * qty));
-      const sub = round2(price * qty - itemDiscount);
+      const sub = round2(price * qty - itemDiscount); // subtotal after manual discount, before global
       subtotal = round2(subtotal + sub);
-      return { itemId: it.itemId, quantity: qty, price, discount: itemDiscount, subtotal: sub };
+      return { itemId: it.itemId, quantity: qty, price, discount: itemDiscount, sub };
     });
 
-    const totalDiscount = Math.max(0, round2(Number(discount)));
     const totalDiscountPct = Math.min(99, Math.max(0, round2(Number(discountPct))));
-    const total = Math.max(0, round2(subtotal - totalDiscount));
+    // Global discount: prefer discountPct (percentage-based); fall back to fixed amount
+    const globalDiscountAmt = totalDiscountPct > 0
+      ? round2(subtotal * totalDiscountPct / 100)
+      : Math.max(0, round2(Number(discount)));
+    const totalDiscount = globalDiscountAmt;
 
-    distributeDiscount(billItems, totalDiscount, total);
+    // Pro-rata distribution of global discount across line items
+    const lineSubtotals = rawItems.map((it) => it.sub);
+    const globalAllocations = distributeGlobalDiscount(lineSubtotals, globalDiscountAmt);
+
+    const billItems = rawItems.map((it, i) => {
+      const globalDiscount = globalAllocations[i];
+      const netSubtotal = round2(it.sub - globalDiscount);
+      return { itemId: it.itemId, quantity: it.quantity, price: it.price, discount: it.discount, globalDiscount, subtotal: netSubtotal };
+    });
+
+    const total = Math.max(0, round2(subtotal - totalDiscount));
 
     const bill = await prisma.bill.create({
       data: {
@@ -231,7 +251,7 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     }
 
     let subtotal = 0;
-    const billItems = (items as any[]).map((it, idx) => {
+    const rawItems = (items as any[]).map((it, idx) => {
       const qty = Number(it.quantity);
       const price = Number(it.price);
       if (!Number.isFinite(qty) || qty <= 0 || !Number.isInteger(qty)) {
@@ -241,15 +261,26 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
         throw Object.assign(new Error(`รายการที่ ${idx + 1}: ราคาไม่ถูกต้อง`), { status: 400 });
       }
       const itemDiscount = Math.min(Math.max(0, round2(Number(it.discount) || 0)), round2(price * qty));
-      const sub = round2(price * qty - itemDiscount);
+      const sub = round2(price * qty - itemDiscount); // after manual discount, before global
       subtotal = round2(subtotal + sub);
-      return { itemId: it.itemId, quantity: qty, price, discount: itemDiscount, subtotal: sub };
+      return { itemId: it.itemId, quantity: qty, price, discount: itemDiscount, sub };
     });
-    const totalDiscount = Math.max(0, round2(Number(discount)));
     const totalDiscountPct = Math.min(99, Math.max(0, round2(Number(discountPct))));
-    const total = Math.max(0, round2(subtotal - totalDiscount));
+    const globalDiscountAmt = totalDiscountPct > 0
+      ? round2(subtotal * totalDiscountPct / 100)
+      : Math.max(0, round2(Number(discount)));
+    const totalDiscount = globalDiscountAmt;
 
-    distributeDiscount(billItems, totalDiscount, total);
+    // Pro-rata distribution of global discount across line items
+    const lineSubtotals = rawItems.map((it) => it.sub);
+    const globalAllocations = distributeGlobalDiscount(lineSubtotals, globalDiscountAmt);
+
+    const billItems = rawItems.map((it, i) => {
+      const globalDiscount = globalAllocations[i];
+      const netSubtotal = round2(it.sub - globalDiscount);
+      return { itemId: it.itemId, quantity: it.quantity, price: it.price, discount: it.discount, globalDiscount, subtotal: netSubtotal };
+    });
+    const total = Math.max(0, round2(subtotal - totalDiscount));
 
     // Atomic: delete old items and recreate within one transaction to prevent data loss
     const updated = await prisma.$transaction(async (tx) => {
@@ -284,6 +315,7 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
         quantity: bi.quantity,
         price: Number(bi.price),
         discount: Number(bi.discount),
+        globalDiscount: Number(bi.globalDiscount ?? 0),
         subtotal: Number(bi.subtotal),
       })),
     };
@@ -295,7 +327,7 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
       notes,
       items: await Promise.all(billItems.map(async (bi) => {
         const item = await prisma.item.findUnique({ where: { id: bi.itemId }, select: { name: true, sku: true, barcode: true } });
-        return { name: item?.name ?? '', sku: item?.sku ?? '', barcode: item?.barcode ?? '', quantity: bi.quantity, price: Number(bi.price), discount: Number(bi.discount), subtotal: Number(bi.subtotal) };
+        return { name: item?.name ?? '', sku: item?.sku ?? '', barcode: item?.barcode ?? '', quantity: bi.quantity, price: Number(bi.price), discount: Number(bi.discount), globalDiscount: Number(bi.globalDiscount), subtotal: Number(bi.subtotal) };
       })),
     };
     logAudit({ userId: req.user!.id, action: 'EDIT_BILL', entity: 'Bill', entityId: bill.id, detail: { billNumber: bill.billNumber, before: beforeSnapshot, after: afterSnapshot }, ip: getClientIp(req) });
