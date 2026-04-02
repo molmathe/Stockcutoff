@@ -54,8 +54,9 @@ export interface BillItem {
   item?: Pick<Item, 'id' | 'name' | 'sku' | 'barcode' | 'imageUrl'> | null;
   quantity: number;
   price: string;
-  discount: string;
-  subtotal: string;
+  discount: string;       // Manual per-line discount
+  globalDiscount: string; // Pro-rata share of global bill discount
+  subtotal: string;       // Net: price*qty - discount - globalDiscount
 }
 
 export interface Bill {

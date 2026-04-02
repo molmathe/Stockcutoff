@@ -750,6 +750,11 @@ export default function POS() {
                         className="w-full text-right text-sm border border-orange-200 bg-orange-50 rounded px-2 py-1 text-orange-700"
                         placeholder="0"
                       />
+                      {billDiscountPct > 0 && lineSubtotal > 0 && (
+                        <p className="text-[10px] text-purple-600 text-right mt-0.5">
+                          +฿{fmt(Math.round((lineSubtotal - effectiveLineTotal) * 100) / 100)} ({billDiscountPct}%)
+                        </p>
+                      )}
                     </div>
 
                     {/* Line total */}
