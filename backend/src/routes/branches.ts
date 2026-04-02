@@ -22,10 +22,7 @@ const importUpload = multer({
   },
 });
 
-const safeBranch = (b: any) => {
-  const { accessToken, ...rest } = b;
-  return rest;
-};
+const safeBranch = (b: any) => b;
 
 // POST import/preview
 router.post('/import/preview', authenticate, requireAdmin, importUpload.single('file'), async (req: AuthRequest, res: Response) => {

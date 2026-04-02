@@ -42,14 +42,21 @@ router.post('/import/preview', authenticate, requireAdmin, importUpload.single('
 // Get all items (with optional pagination)
 router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const { search, category, active, page, limit } = req.query;
+    const { search, searchBy, category, active, page, limit } = req.query;
     const where: any = {};
     if (search) {
-      where.OR = [
-        { name: { contains: search as string, mode: 'insensitive' } },
-        { sku: { contains: search as string, mode: 'insensitive' } },
-        { barcode: { contains: search as string } },
-      ];
+      const s = search as string;
+      if (searchBy === 'sku') {
+        where.sku = { contains: s, mode: 'insensitive' };
+      } else if (searchBy === 'barcode') {
+        where.barcode = { contains: s };
+      } else {
+        where.OR = [
+          { name: { contains: s, mode: 'insensitive' } },
+          { sku: { contains: s, mode: 'insensitive' } },
+          { barcode: { contains: s } },
+        ];
+      }
     }
     if (category) where.category = category;
     if (active !== undefined) where.active = active === 'true';

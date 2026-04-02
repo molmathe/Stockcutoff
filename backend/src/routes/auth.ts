@@ -17,7 +17,7 @@ router.post('/login', async (req: Request, res: Response) => {
     const user = await prisma.user.findUnique({ where: { username }, include: { branch: true } });
 
     if (!user || !user.active || !(await bcrypt.compare(password, user.password))) {
-      await logAudit({ userId: 'UNKNOWN', action: 'LOGIN_FAILED', entity: 'User', detail: { username }, ip: getClientIp(req) });
+      await logAudit({ userId: undefined, action: 'LOGIN_FAILED', entity: 'User', detail: { username }, ip: getClientIp(req) });
       return res.status(401).json({ error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
     }
 
@@ -47,7 +47,7 @@ router.post('/pos-login', async (req: Request, res: Response) => {
 
     const branch = await prisma.branch.findUnique({ where: { pincode: String(pincode) } });
     if (!branch || !branch.active || branch.deletedAt) {
-      await logAudit({ userId: 'UNKNOWN', action: 'POS_LOGIN_FAILED', entity: 'Branch', detail: { pincode }, ip: getClientIp(req) });
+      await logAudit({ userId: undefined, action: 'POS_LOGIN_FAILED', entity: 'Branch', detail: { pincode }, ip: getClientIp(req) });
       return res.status(401).json({ error: 'รหัส PIN ไม่ถูกต้อง' });
     }
 

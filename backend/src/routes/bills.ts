@@ -8,6 +8,31 @@ const router = Router();
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+// Distribute bill-level discount pro-rata across items and stamp netSubtotal on each.
+// Last item absorbs any ±0.01 rounding remainder so sum(netSubtotal) === billTotal exactly.
+const distributeDiscount = (
+  items: { subtotal: number; [k: string]: any }[],
+  totalDiscount: number,
+  billTotal: number,
+): void => {
+  if (items.length === 0) return;
+  if (totalDiscount === 0) {
+    items.forEach(i => { i.netSubtotal = i.subtotal; });
+    return;
+  }
+  const totalSub = items.reduce((s, i) => s + i.subtotal, 0);
+  let sumNet = 0;
+  for (let idx = 0; idx < items.length; idx++) {
+    if (idx === items.length - 1) {
+      items[idx].netSubtotal = round2(billTotal - sumNet);
+    } else {
+      const proRata = totalSub > 0 ? round2(items[idx].subtotal / totalSub * totalDiscount) : 0;
+      items[idx].netSubtotal = round2(items[idx].subtotal - proRata);
+      sumNet = round2(sumNet + items[idx].netSubtotal);
+    }
+  }
+};
+
 const generateBillNumber = () => {
   const d = new Date();
   const date = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
@@ -144,6 +169,8 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
     const totalDiscountPct = Math.min(99, Math.max(0, round2(Number(discountPct))));
     const total = Math.max(0, round2(subtotal - totalDiscount));
 
+    distributeDiscount(billItems, totalDiscount, total);
+
     const bill = await prisma.bill.create({
       data: {
         billNumber: generateBillNumber(),
@@ -221,6 +248,8 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     const totalDiscount = Math.max(0, round2(Number(discount)));
     const totalDiscountPct = Math.min(99, Math.max(0, round2(Number(discountPct))));
     const total = Math.max(0, round2(subtotal - totalDiscount));
+
+    distributeDiscount(billItems, totalDiscount, total);
 
     // Atomic: delete old items and recreate within one transaction to prevent data loss
     const updated = await prisma.$transaction(async (tx) => {

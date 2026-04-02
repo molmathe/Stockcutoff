@@ -229,7 +229,7 @@ router.get('/dashboard', authenticate, requireAdmin, async (req: AuthRequest, re
       for (const bi of b.items) {
         if (!itemMap[bi.itemId]) itemMap[bi.itemId] = { name: bi.item.name, sku: bi.item.sku, barcode: bi.item.barcode, imageUrl: bi.item.imageUrl, qty: 0, revenue: 0 };
         itemMap[bi.itemId].qty += bi.quantity;
-        itemMap[bi.itemId].revenue += Number(bi.subtotal);
+        itemMap[bi.itemId].revenue += Number((bi as any).netSubtotal ?? bi.subtotal);
         if (Number(bi.discount) > 0) {
           if (!discountMap[bi.itemId]) discountMap[bi.itemId] = { name: bi.item.name, sku: bi.item.sku, barcode: bi.item.barcode, imageUrl: bi.item.imageUrl, qty: 0, totalDiscount: 0 };
           discountMap[bi.itemId].qty += bi.quantity;
@@ -290,7 +290,7 @@ router.get('/sales', authenticate, requireAdmin, async (req: AuthRequest, res: R
           itemSummary[bi.itemId] = { itemId: bi.itemId, name: bi.item.name, sku: bi.item.sku, qty: 0, revenue: 0 };
         }
         itemSummary[bi.itemId].qty += bi.quantity;
-        itemSummary[bi.itemId].revenue += Number(bi.subtotal);
+        itemSummary[bi.itemId].revenue += Number((bi as any).netSubtotal ?? bi.subtotal);
       }
     }
     res.json({
@@ -361,7 +361,7 @@ router.get('/download', authenticate, requireAdmin, async (req: AuthRequest, res
         bill: b.billNumber, branch: b.branch.name,
         date: saleDate.toLocaleString('th-TH'),
         sku: bi.item.sku, barcode: bi.item.barcode, name: bi.item.name,
-        qty: bi.quantity, price: Number(bi.price), discount: Number(bi.discount), subtotal: Number(bi.subtotal),
+        qty: bi.quantity, price: Number(bi.price), discount: Number(bi.discount), subtotal: Number((bi as any).netSubtotal ?? bi.subtotal),
       });
     }));
 
@@ -376,7 +376,7 @@ router.get('/download', authenticate, requireAdmin, async (req: AuthRequest, res
     bills.forEach((b) => b.items.forEach((bi) => {
       if (!itemMap[bi.itemId]) itemMap[bi.itemId] = { sku: bi.item.sku, name: bi.item.name, qty: 0, revenue: 0 };
       itemMap[bi.itemId].qty += bi.quantity;
-      itemMap[bi.itemId].revenue += Number(bi.subtotal);
+      itemMap[bi.itemId].revenue += Number((bi as any).netSubtotal ?? bi.subtotal);
     }));
     Object.values(itemMap).sort((a, b) => b.revenue - a.revenue).forEach((r) => s3.addRow(r));
 
@@ -438,7 +438,7 @@ router.get('/export-master', authenticate, requireAdmin, async (req: AuthRequest
           itemName: bi.item.name,
           qty: bi.quantity,
           price: Number(bi.price),
-          subtotal: Number(bi.subtotal),
+          subtotal: Number((bi as any).netSubtotal ?? bi.subtotal),
           saleDate: saleDate.toISOString().split('T')[0],
           source: b.source,
           billNumber: b.billNumber,

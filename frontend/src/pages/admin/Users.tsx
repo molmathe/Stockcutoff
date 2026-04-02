@@ -5,6 +5,7 @@ import { Plus, Pencil, Trash2, Users as UsersIcon } from 'lucide-react';
 import client from '../../api/client';
 import Modal from '../../components/Modal';
 import { useAuth } from '../../context/AuthContext';
+import { BranchCombobox } from '../../components/AutocompleteInputs';
 import type { User, Branch } from '../../types';
 
 const ROLES = ['SUPER_ADMIN', 'BRANCH_ADMIN', 'CASHIER'];
@@ -167,10 +168,12 @@ export default function Users() {
             )}
             <div>
               <label className="label">สาขา</label>
-              <select value={form.branchId} onChange={(e) => setForm((f) => ({ ...f, branchId: e.target.value }))} className="input">
-                <option value="">— ไม่ระบุสาขา —</option>
-                {branches.map((b) => <option key={b.id} value={b.id}>{b.name} ({b.code})</option>)}
-              </select>
+              <BranchCombobox
+                value={form.branchId}
+                onChange={(id) => setForm((f) => ({ ...f, branchId: id }))}
+                branches={branches}
+                allLabel="— ไม่ระบุสาขา —"
+              />
             </div>
             {editing && (
               <div className="flex items-center gap-2">

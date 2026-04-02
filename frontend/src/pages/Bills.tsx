@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { FileText, ChevronDown, ChevronUp, X, Pencil, Plus, Trash2 } from 'lucide-react';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { BranchCombobox } from '../components/AutocompleteInputs';
 import type { Bill, Branch } from '../types';
 
 const statusBadge = (s: string) => {
@@ -206,10 +207,12 @@ export default function Bills() {
           {isAdmin && (
             <div>
               <label className="label">สาขา</label>
-              <select value={filters.branchId} onChange={(e) => setFilters((f) => ({ ...f, branchId: e.target.value }))} className="input">
-                <option value="">ทุกสาขา</option>
-                {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
+              <BranchCombobox
+                value={filters.branchId}
+                onChange={(id) => setFilters((f) => ({ ...f, branchId: id }))}
+                branches={branches}
+                allLabel="ทุกสาขา"
+              />
             </div>
           )}
         </div>
@@ -300,7 +303,7 @@ export default function Bills() {
                           <th className="text-right py-2">จำนวน</th>
                           <th className="text-right py-2">ราคา</th>
                           <th className="text-right py-2">ส่วนลด</th>
-                          <th className="text-right py-2">รวม</th>
+                          <th className="text-right py-2">สุทธิ/รายการ</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -324,7 +327,7 @@ export default function Bills() {
                             <td className="text-right py-2">{bi.quantity}</td>
                             <td className="text-right py-2">฿{Number(bi.price).toFixed(2)}</td>
                             <td className="text-right py-2 text-orange-600">{Number(bi.discount) > 0 ? `-฿${Number(bi.discount).toFixed(2)}` : '-'}</td>
-                            <td className="text-right py-2 font-medium">฿{Number(bi.subtotal).toFixed(2)}</td>
+                            <td className="text-right py-2 font-medium">฿{Number(bi.netSubtotal ?? bi.subtotal).toFixed(2)}</td>
                           </tr>
                         ))}
                       </tbody>

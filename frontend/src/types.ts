@@ -56,6 +56,7 @@ export interface BillItem {
   price: string;
   discount: string;
   subtotal: string;
+  netSubtotal: string;
 }
 
 export interface Bill {
@@ -93,23 +94,6 @@ export interface BlockedBarcode {
   barcode: string;
   reason: string | null;
   createdBy: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface ReportTemplate {
-  id: string;
-  name: string;
-  description: string | null;
-  columnDate: string | null;
-  columnBarcode: string | null;
-  columnSku: string | null;
-  columnPrice: string;
-  columnQty: string;
-  columnBranchId: string | null;
-  columnBranchName: string | null;
-  branchMatchBy: string;
-  itemMatchBy: string;
   createdAt: string;
   updatedAt: string;
 }
