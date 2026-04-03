@@ -696,7 +696,7 @@ export default function POS() {
             <span className="font-medium text-gray-700 text-sm">สรุปยอดขายวันนี้</span>
             {summary && !loadingSummary && (
               <span className="ml-auto text-xs text-gray-500 shrink-0">
-                {summary.totalBills} บิล · ฿{fmt(summary.totalRevenue)}
+                {summary.totalBills} บิล · ฿{fmt(summary.totalRevenue + summary.openRevenue)}
               </span>
             )}
             {loadingSummary && <RefreshCw size={13} className="ml-auto animate-spin text-gray-400" />}
@@ -716,9 +716,15 @@ export default function POS() {
                     <p className="text-xl font-bold text-orange-600">{summary?.openBills ?? 0}</p>
                     <p className="text-xs text-gray-500">บิลเปิด</p>
                   </div>
-                  <div className="text-center bg-blue-50 rounded-lg py-2">
-                    <p className="text-lg font-bold text-blue-700">฿{fmt(summary?.totalRevenue ?? 0)}</p>
-                    <p className="text-xs text-gray-500">รายได้รวม</p>
+                  <div className="bg-blue-50 rounded-lg py-2 px-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-yellow-600">ยังไม่ปิด</span>
+                      <span className="text-xs font-semibold text-yellow-700">฿{fmt(summary?.openRevenue ?? 0)}</span>
+                    </div>
+                    <div className="border-t border-blue-100 mt-1 pt-1 flex items-center justify-between">
+                      <span className="text-[10px] text-gray-500">รายได้รวม</span>
+                      <span className="text-xs font-bold text-blue-700">฿{fmt((summary?.totalRevenue ?? 0) + (summary?.openRevenue ?? 0))}</span>
+                    </div>
                   </div>
                 </div>
               </div>

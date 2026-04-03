@@ -174,6 +174,8 @@ export default function Bills() {
   const editTotal = Math.max(0, editSubtotal - (editState?.discount ?? 0));
 
   const totalRevenue = bills.filter((b) => b.status === 'SUBMITTED').reduce((s, b) => s + Number(b.total), 0);
+  const openRevenue = bills.filter((b) => b.status === 'OPEN').reduce((s, b) => s + Number(b.total), 0);
+  const grandTotal = totalRevenue + openRevenue;
 
   return (
     <div className="space-y-4">
@@ -224,16 +226,24 @@ export default function Bills() {
 
       {/* Summary */}
       <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: 'บิลทั้งหมด', value: bills.length },
-          { label: 'ส่งแล้ว', value: bills.filter((b) => b.status === 'SUBMITTED').length },
-          { label: 'รายได้รวม', value: `฿${totalRevenue.toLocaleString('th-TH', { minimumFractionDigits: 2 })}` },
-        ].map((s) => (
-          <div key={s.label} className="card text-center py-3">
-            <p className="text-2xl font-bold text-gray-800">{s.value}</p>
-            <p className="text-xs text-gray-500 mt-0.5">{s.label}</p>
+        <div className="card text-center py-3">
+          <p className="text-2xl font-bold text-gray-800">{bills.length}</p>
+          <p className="text-xs text-gray-500 mt-0.5">บิลทั้งหมด</p>
+        </div>
+        <div className="card text-center py-3">
+          <p className="text-2xl font-bold text-gray-800">{bills.filter((b) => b.status === 'SUBMITTED').length}</p>
+          <p className="text-xs text-gray-500 mt-0.5">ส่งแล้ว</p>
+        </div>
+        <div className="card py-3 px-4">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-yellow-600">ยังไม่ปิด</span>
+            <span className="text-sm font-semibold text-yellow-700">฿{openRevenue.toLocaleString('th-TH', { minimumFractionDigits: 2 })}</span>
           </div>
-        ))}
+          <div className="border-t border-gray-100 mt-2 pt-2 flex items-center justify-between">
+            <span className="text-xs text-gray-500">รายได้รวม</span>
+            <span className="text-sm font-bold text-gray-800">฿{grandTotal.toLocaleString('th-TH', { minimumFractionDigits: 2 })}</span>
+          </div>
+        </div>
       </div>
 
       {/* Bills list */}
