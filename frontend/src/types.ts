@@ -75,6 +75,7 @@ export interface Bill {
   total: string;
   notes: string | null;
   paymentMethod: 'CASH' | 'BANK_TRANSFER';
+  importPlatform: string | null;
   slipUrl: string | null;
   createdAt: string;
   submittedAt: string | null;

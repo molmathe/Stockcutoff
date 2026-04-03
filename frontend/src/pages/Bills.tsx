@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
-import { FileText, ChevronDown, ChevronUp, X, Pencil, Plus, Trash2, Banknote, CreditCard, ZoomIn } from 'lucide-react';
+import { FileText, ChevronDown, ChevronUp, X, Pencil, Plus, Trash2, Banknote, CreditCard, ZoomIn, FileSpreadsheet } from 'lucide-react';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { BranchCombobox } from '../components/AutocompleteInputs';
@@ -265,7 +265,11 @@ export default function Bills() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-medium text-gray-800">{bill.billNumber}</span>
                       <span className={statusBadge(bill.status)}>{statusLabel[bill.status] || bill.status}</span>
-                      {bill.paymentMethod === 'BANK_TRANSFER' ? (
+                      {bill.source === 'IMPORT' ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full">
+                          <FileSpreadsheet size={10} /> Report{bill.importPlatform ? ` (${bill.importPlatform})` : ''}
+                        </span>
+                      ) : bill.paymentMethod === 'BANK_TRANSFER' ? (
                         <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">
                           <CreditCard size={10} /> โอนเงิน
                           {bill.slipUrl && <span className="w-1.5 h-1.5 rounded-full bg-green-400 ml-0.5" title="มีสลิป" />}
