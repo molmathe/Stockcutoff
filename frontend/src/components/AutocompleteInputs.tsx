@@ -31,8 +31,8 @@ export const BranchCombobox: React.FC<BranchComboboxProps> = ({
     ? branches.filter(b =>
         b.name.toLowerCase().includes(query.toLowerCase()) ||
         b.code.toLowerCase().includes(query.toLowerCase())
-      ).slice(0, 8)
-    : branches.slice(0, 8);
+      )
+    : branches;
 
   // Close on outside click
   useEffect(() => {

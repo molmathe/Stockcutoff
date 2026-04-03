@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Bill" ADD COLUMN "paymentMethod" TEXT NOT NULL DEFAULT 'CASH';
+ALTER TABLE "Bill" ADD COLUMN "slipUrl" TEXT;

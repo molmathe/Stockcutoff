@@ -1,8 +1,32 @@
 import { Router, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
+import path from 'path';
+import fs from 'fs';
+import multer from 'multer';
 import prisma from '../lib/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { logAudit, getClientIp } from '../lib/audit';
+
+// Slip image upload — stored in /uploads/ alongside item images
+const slipUploadDir = path.join(__dirname, '../../uploads');
+if (!fs.existsSync(slipUploadDir)) fs.mkdirSync(slipUploadDir, { recursive: true });
+const slipUpload = multer({
+  storage: multer.diskStorage({
+    destination: slipUploadDir,
+    filename: (_req, file, cb) => {
+      const unique = `slip-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+      cb(null, `${unique}${path.extname(file.originalname).toLowerCase()}`);
+    },
+  }),
+  fileFilter: (_req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+    if (/jpeg|jpg|png|gif|webp/.test(path.extname(file.originalname).toLowerCase()) && /image/.test(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files allowed'));
+    }
+  },
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB for slip photos
+});
 
 const router = Router();
 
@@ -146,7 +170,7 @@ router.get('/today-summary', authenticate, async (req: AuthRequest, res: Respons
 // POST /bills — create new bill
 router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const { branchId, items, notes, discount = 0, discountPct = 0 } = req.body;
+    const { branchId, items, notes, discount = 0, discountPct = 0, paymentMethod = 'CASH' } = req.body;
 
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'กรุณาเพิ่มสินค้าอย่างน้อย 1 รายการ' });
@@ -191,6 +215,7 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
 
     const total = Math.max(0, round2(subtotal - totalDiscount));
 
+    const validPaymentMethod = paymentMethod === 'BANK_TRANSFER' ? 'BANK_TRANSFER' : 'CASH';
     const bill = await prisma.bill.create({
       data: {
         billNumber: generateBillNumber(),
@@ -201,6 +226,7 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
         discountPct: totalDiscountPct,
         total,
         notes,
+        paymentMethod: validPaymentMethod,
         items: { create: billItems },
       },
       include: {
@@ -244,7 +270,7 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ error: 'ไม่มีสิทธิ์แก้ไขบิลสาขาอื่น' });
     }
 
-    const { items, notes, discount = 0, discountPct = 0 } = req.body;
+    const { items, notes, discount = 0, discountPct = 0, paymentMethod } = req.body;
 
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'กรุณาเพิ่มสินค้าอย่างน้อย 1 รายการ' });
@@ -282,19 +308,24 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     });
     const total = Math.max(0, round2(subtotal - totalDiscount));
 
+    const updateData: any = {
+      subtotal,
+      discount: totalDiscount,
+      discountPct: totalDiscountPct,
+      total,
+      notes,
+      items: { create: billItems },
+    };
+    if (paymentMethod === 'CASH' || paymentMethod === 'BANK_TRANSFER') {
+      updateData.paymentMethod = paymentMethod;
+    }
+
     // Atomic: delete old items and recreate within one transaction to prevent data loss
     const updated = await prisma.$transaction(async (tx) => {
       await tx.billItem.deleteMany({ where: { billId: bill.id } });
       return tx.bill.update({
         where: { id: req.params.id },
-        data: {
-          subtotal,
-          discount: totalDiscount,
-          discountPct: totalDiscountPct,
-          total,
-          notes,
-          items: { create: billItems },
-        },
+        data: updateData,
         include: {
           branch: { select: { id: true, name: true, code: true } },
           user: { select: { id: true, name: true } },
@@ -404,6 +435,64 @@ router.put('/:id/cancel', authenticate, async (req: AuthRequest, res: Response) 
   }
 });
 
+// POST /bills/:id/slip — upload payment slip image (replaces existing slip)
+router.post('/:id/slip', authenticate, slipUpload.single('slip'), async (req: AuthRequest, res: Response) => {
+  try {
+    const bill = await prisma.bill.findUnique({ where: { id: req.params.id } });
+    if (!bill) return res.status(404).json({ error: 'ไม่พบบิล' });
+
+    // Permission: cashier only their own bills, branch_admin their branch
+    if (req.user!.role === 'CASHIER' && bill.userId !== req.user!.id) {
+      return res.status(403).json({ error: 'ไม่มีสิทธิ์อัพโหลดสลิปบิลนี้' });
+    }
+    if (req.user!.role === 'BRANCH_ADMIN' && bill.branchId !== req.user!.branchId) {
+      return res.status(403).json({ error: 'ไม่มีสิทธิ์อัพโหลดสลิปบิลสาขาอื่น' });
+    }
+
+    if (!req.file) return res.status(400).json({ error: 'กรุณาเลือกไฟล์รูปภาพ' });
+
+    // Remove old slip file from disk if it exists
+    if (bill.slipUrl) {
+      const oldPath = path.join(__dirname, '../..', bill.slipUrl);
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    }
+
+    const slipUrl = `/uploads/${req.file.filename}`;
+    const updated = await prisma.bill.update({
+      where: { id: req.params.id },
+      data: { slipUrl },
+    });
+    res.json({ slipUrl: updated.slipUrl });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// DELETE /bills/:id/slip — remove slip image from a bill
+router.delete('/:id/slip', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const bill = await prisma.bill.findUnique({ where: { id: req.params.id } });
+    if (!bill) return res.status(404).json({ error: 'ไม่พบบิล' });
+
+    if (req.user!.role === 'CASHIER' && bill.userId !== req.user!.id) {
+      return res.status(403).json({ error: 'ไม่มีสิทธิ์' });
+    }
+    if (req.user!.role === 'BRANCH_ADMIN' && bill.branchId !== req.user!.branchId) {
+      return res.status(403).json({ error: 'ไม่มีสิทธิ์' });
+    }
+
+    if (bill.slipUrl) {
+      const filePath = path.join(__dirname, '../..', bill.slipUrl);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
+
+    await prisma.bill.update({ where: { id: req.params.id }, data: { slipUrl: null } });
+    res.json({ message: 'ลบสลิปเรียบร้อย' });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // DELETE /bills/:id — hard delete a SUBMITTED or CANCELLED bill (SUPER_ADMIN only)
 router.delete('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
@@ -418,6 +507,12 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     if (!bill) return res.status(404).json({ error: 'ไม่พบบิล' });
     if (bill.status !== 'SUBMITTED' && bill.status !== 'CANCELLED') {
       return res.status(400).json({ error: 'ลบได้เฉพาะบิลที่ส่งแล้ว (SUBMITTED) หรือยกเลิก (CANCELLED) เท่านั้น' });
+    }
+
+    // Remove slip image from disk if exists
+    if (bill.slipUrl) {
+      const slipPath = path.join(__dirname, '../..', bill.slipUrl);
+      if (fs.existsSync(slipPath)) fs.unlinkSync(slipPath);
     }
 
     await prisma.bill.delete({ where: { id: req.params.id } });

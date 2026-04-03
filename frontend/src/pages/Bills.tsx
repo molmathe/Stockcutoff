@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
-import { FileText, ChevronDown, ChevronUp, X, Pencil, Plus, Trash2 } from 'lucide-react';
+import { FileText, ChevronDown, ChevronUp, X, Pencil, Plus, Trash2, Banknote, CreditCard, ZoomIn } from 'lucide-react';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { BranchCombobox } from '../components/AutocompleteInputs';
@@ -47,6 +47,7 @@ export default function Bills() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [editState, setEditState] = useState<EditState | null>(null);
   const [barcodeSearching, setBarcodeSearching] = useState<Record<number, boolean>>({});
+  const [slipLightbox, setSlipLightbox] = useState<string | null>(null);
 
   const today = format(new Date(), 'yyyy-MM-dd');
   const defaultFilters = { startDate: today, endDate: today, status: '', branchId: '' };
@@ -264,6 +265,16 @@ export default function Bills() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-medium text-gray-800">{bill.billNumber}</span>
                       <span className={statusBadge(bill.status)}>{statusLabel[bill.status] || bill.status}</span>
+                      {bill.paymentMethod === 'BANK_TRANSFER' ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">
+                          <CreditCard size={10} /> โอนเงิน
+                          {bill.slipUrl && <span className="w-1.5 h-1.5 rounded-full bg-green-400 ml-0.5" title="มีสลิป" />}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">
+                          <Banknote size={10} /> เงินสด
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-gray-400 mt-0.5">
                       {bill.branch.name} • {bill.user.name} • {format(new Date(bill.createdAt), 'dd/MM/yyyy HH:mm')}
@@ -374,6 +385,36 @@ export default function Bills() {
                       </tfoot>
                     </table>
                     {bill.notes && <p className="text-xs text-gray-500 mt-2">หมายเหตุ: {bill.notes}</p>}
+
+                    {/* Payment slip */}
+                    {bill.slipUrl ? (
+                      <div className="mt-3 flex items-start gap-3">
+                        <div className="shrink-0">
+                          <p className="text-[11px] text-gray-400 mb-1 flex items-center gap-1">
+                            <CreditCard size={11} /> สลิปโอนเงิน
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setSlipLightbox(bill.slipUrl!)}
+                            className="relative group block"
+                            title="คลิกเพื่อดูเต็มจอ"
+                          >
+                            <img
+                              src={bill.slipUrl}
+                              alt="สลิปโอนเงิน"
+                              className="h-28 w-auto rounded-lg border border-blue-200 object-contain bg-white shadow-sm"
+                            />
+                            <div className="absolute inset-0 bg-black/30 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                              <ZoomIn size={22} className="text-white" />
+                            </div>
+                          </button>
+                        </div>
+                      </div>
+                    ) : bill.paymentMethod === 'BANK_TRANSFER' ? (
+                      <p className="text-[11px] text-orange-500 mt-2 flex items-center gap-1">
+                        <CreditCard size={11} /> โอนเงิน — ยังไม่มีสลิป
+                      </p>
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -381,6 +422,28 @@ export default function Bills() {
           </div>
         )}
       </div>
+
+      {/* Slip Lightbox */}
+      {slipLightbox && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+          onClick={() => setSlipLightbox(null)}
+        >
+          <div className="relative max-w-2xl w-full" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setSlipLightbox(null)}
+              className="absolute -top-10 right-0 text-white/70 hover:text-white flex items-center gap-1 text-sm"
+            >
+              <X size={18} /> ปิด
+            </button>
+            <img
+              src={slipLightbox}
+              alt="สลิปโอนเงิน"
+              className="w-full max-h-[80vh] object-contain rounded-xl shadow-2xl bg-white"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Edit Bill Modal */}
       {editState && (
