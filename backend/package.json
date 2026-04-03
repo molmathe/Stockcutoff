@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@prisma/client": "^5.10.2",
+    "prisma": "^5.10.2",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
@@ -33,7 +34,6 @@
     "@types/node": "^20.11.30",
     "@types/uuid": "^9.0.8",
     "jest": "^30.3.0",
-    "prisma": "^5.10.2",
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
