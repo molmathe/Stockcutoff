@@ -143,27 +143,6 @@ export default function POS() {
     finally { setLoadingSummary(false); }
   };
 
-  const openSearchPopup = useCallback(async (query: string) => {
-    if (!query.trim()) return;
-    setShowSuggestions(false);
-    setSuggestions([]);
-    setSearchModalTerm(query.trim());
-    setSearchModalResults([]);
-    setShowSearchModal(true);
-    setSearchModalLoading(true);
-    try {
-      const { data } = await client.get('/items', {
-        params: { search: query.trim(), active: 'true', page: 1, limit: 50 },
-      });
-      const items: Item[] = Array.isArray(data) ? data : (data.items ?? []);
-      setSearchModalResults(items);
-    } catch {
-      setSearchModalResults([]);
-    } finally {
-      setSearchModalLoading(false);
-    }
-  }, []);
-
   const lookupBarcode = useCallback(async (code: string) => {
     if (!code.trim()) return;
     setShowSuggestions(false);
