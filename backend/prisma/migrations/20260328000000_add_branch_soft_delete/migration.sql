@@ -1,4 +1,4 @@
 -- Add soft delete support to Branch
-ALTER TABLE "Branch" ADD COLUMN "deletedAt" TIMESTAMP(3);
+ALTER TABLE "Branch" ADD COLUMN IF NOT EXISTS "deletedAt" TIMESTAMP(3);
 
-CREATE INDEX "Branch_deletedAt_idx" ON "Branch"("deletedAt");
+CREATE INDEX IF NOT EXISTS "Branch_deletedAt_idx" ON "Branch"("deletedAt");

@@ -1,28 +1,62 @@
-name: Build & Push Docker Images
+name: Build, Deploy, and Tag UAT
 
 on:
   push:
-    branches: [main]
-    tags: ['v*']
-  pull_request:
-    branches: [main]
+    branches:
+      - uat
+      - UAT
+
+concurrency:
+  group: uat-deploy
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ${{ github.repository_owner }}/stockcutoff
+  BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/stockcutoff-backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/stockcutoff-frontend
 
 jobs:
-  build:
+  metadata:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.vars.outputs.version }}
+      short_sha: ${{ steps.vars.outputs.short_sha }}
+      image_tag: ${{ steps.vars.outputs.image_tag }}
+      git_tag: ${{ steps.vars.outputs.git_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: vars
+        run: |
+          set -euo pipefail
+
+          version="$(tr -d '[:space:]' < VERSION)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "VERSION must be MAJOR.MINOR.PATCH, got: $version" >&2
+            exit 1
+          fi
+
+          short_sha="${GITHUB_SHA::12}"
+          image_tag="${version}-uat-${short_sha}.${GITHUB_RUN_NUMBER}"
+          git_tag="uat-v${version}+${short_sha}.${GITHUB_RUN_NUMBER}"
+
+          {
+            echo "version=$version"
+            echo "short_sha=$short_sha"
+            echo "image_tag=$image_tag"
+            echo "git_tag=$git_tag"
+          } >> "$GITHUB_OUTPUT"
+
+  build_and_push:
+    runs-on: ubuntu-latest
+    needs: metadata
     permissions:
       contents: read
       packages: write
-
     steps:
       - uses: actions/checkout@v4
 
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -32,20 +66,137 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build & push backend
+      - name: Build and push backend image
         uses: docker/build-push-action@v5
         with:
           context: ./backend
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-backend:${{ github.ref_name == 'main' && 'latest' || github.ref_name }}
+          push: true
+          tags: ${{ env.BACKEND_IMAGE }}:${{ needs.metadata.outputs.image_tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.metadata.outputs.version }}
+            org.opencontainers.image.ref.name=${{ needs.metadata.outputs.git_tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Build & push frontend
+      - name: Build and push frontend image
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-frontend:${{ github.ref_name == 'main' && 'latest' || github.ref_name }}
+          push: true
+          tags: ${{ env.FRONTEND_IMAGE }}:${{ needs.metadata.outputs.image_tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.metadata.outputs.version }}
+            org.opencontainers.image.ref.name=${{ needs.metadata.outputs.git_tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy_uat:
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - uat
+      - stockcutoff
+    needs:
+      - metadata
+      - build_and_push
+    permissions:
+      contents: read
+    env:
+      DEPLOY_PATH: /opt/stockcutoff-uat
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync deployment bundle locally
+        run: |
+          set -euo pipefail
+          install -d -m 0755 "$DEPLOY_PATH" "$DEPLOY_PATH/nginx"
+          install -m 0644 docker-compose.yml "$DEPLOY_PATH/docker-compose.yml"
+          install -m 0644 nginx/nginx.conf "$DEPLOY_PATH/nginx/nginx.conf"
+
+      - name: Pull and deploy on self-hosted UAT runner
+        env:
+          IMAGE_TAG: ${{ needs.metadata.outputs.image_tag }}
+        run: |
+          set -euo pipefail
+
+          wait_for_http() {
+            local url="$1"
+            local attempts="${2:-30}"
+            local delay="${3:-2}"
+
+            for ((i=1; i<=attempts; i++)); do
+              if curl --fail --silent --show-error "$url" >/dev/null; then
+                return 0
+              fi
+
+              sleep "$delay"
+            done
+
+            echo "Timed out waiting for $url" >&2
+            return 1
+          }
+
+          cd "$DEPLOY_PATH"
+
+          if [ ! -f .env ]; then
+            echo "Missing $DEPLOY_PATH/.env on runner host." >&2
+            exit 1
+          fi
+
+          if grep -q '^IMAGE_TAG=' .env; then
+            sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=$IMAGE_TAG/" .env
+          else
+            printf '\nIMAGE_TAG=%s\n' "$IMAGE_TAG" >> .env
+          fi
+
+          docker compose pull
+          docker compose up -d --remove-orphans
+          docker compose restart nginx
+
+          app_port="$(awk -F= '/^PORT=/{print $2}' .env | tail -n 1)"
+          app_port="${app_port:-8082}"
+          wait_for_http "http://127.0.0.1:${app_port}/health"
+
+          portainer_port="$(awk -F= '/^PORTAINER_PORT=/{print $2}' .env | tail -n 1)"
+          portainer_port="${portainer_port:-9000}"
+          wait_for_http "http://127.0.0.1:${portainer_port}"
+
+          kuma_port="$(awk -F= '/^UPTIME_KUMA_PORT=/{print $2}' .env | tail -n 1)"
+          kuma_port="${kuma_port:-3002}"
+          wait_for_http "http://127.0.0.1:${kuma_port}"
+
+  create_git_tag:
+    runs-on: ubuntu-latest
+    needs:
+      - metadata
+      - deploy_uat
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Create and push deployment tag
+        env:
+          GIT_TAG: ${{ needs.metadata.outputs.git_tag }}
+        run: |
+          set -euo pipefail
+
+          if git show-ref --verify --quiet "refs/tags/$GIT_TAG"; then
+            echo "Tag $GIT_TAG already exists. Skipping."
+            exit 0
+          fi
+
+          git tag -a "$GIT_TAG" -m "UAT deploy $GIT_TAG"
+          git push origin "$GIT_TAG"
