@@ -155,7 +155,11 @@ jobs:
           fi
 
           docker compose pull
-          docker compose up -d --remove-orphans
+          docker compose up -d --remove-orphans || {
+            echo "=== docker compose up failed — backend logs ===" >&2
+            docker logs stockcutoff-backend --tail 80 2>&1 || true
+            exit 1
+          }
           docker compose restart nginx
 
           app_port="$(awk -F= '/^PORT=/{print $2}' .env | tail -n 1)"
