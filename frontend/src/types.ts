@@ -74,6 +74,8 @@ export interface Bill {
   discountPct: string;
   total: string;
   notes: string | null;
+  paymentMethod: 'CASH' | 'BANK_TRANSFER';
+  slipUrl: string | null;
   createdAt: string;
   submittedAt: string | null;
   items: BillItem[];

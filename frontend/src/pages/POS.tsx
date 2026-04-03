@@ -3,7 +3,7 @@ import toast from 'react-hot-toast';
 import {
   Camera, Search, Plus, Minus, Trash2, ShoppingCart,
   CheckCircle, X, BarChart3, RefreshCw, Pencil, Lock,
-  AlertTriangle, ShieldAlert,
+  AlertTriangle, ShieldAlert, Banknote, CreditCard, Upload, ImageIcon,
 } from 'lucide-react';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -67,7 +67,14 @@ export default function POS() {
   const [notFoundBarcode, setNotFoundBarcode] = useState<string | null>(null);
   const [blockedBarcode, setBlockedBarcode] = useState<string | null>(null);
 
+  // Payment method & slip
+  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'BANK_TRANSFER'>('CASH');
+  const [slipFile, setSlipFile] = useState<File | null>(null);
+  const [slipPreview, setSlipPreview] = useState<string | null>(null);
+
   const inputRef = useRef<HTMLInputElement>(null);
+  const slipFileRef = useRef<HTMLInputElement>(null);
+  const slipCameraRef = useRef<HTMLInputElement>(null);
   const suggestRef = useRef<HTMLDivElement>(null);
 
   const isAdmin = user?.role !== 'CASHIER';
@@ -266,6 +273,24 @@ export default function POS() {
     setNotes('');
     setEditingBillId(null);
     setLastSaved(null);
+    setPaymentMethod('CASH');
+    setSlipFile(null);
+    setSlipPreview(null);
+  };
+
+  const handleSlipFileSelected = (file: File | null) => {
+    if (!file) return;
+    setSlipFile(file);
+    const url = URL.createObjectURL(file);
+    setSlipPreview(url);
+  };
+
+  const removeSlip = () => {
+    setSlipFile(null);
+    if (slipPreview) URL.revokeObjectURL(slipPreview);
+    setSlipPreview(null);
+    if (slipFileRef.current) slipFileRef.current.value = '';
+    if (slipCameraRef.current) slipCameraRef.current.value = '';
   };
 
   const grossSubtotal = Math.round(cartItems.reduce((s, c) => s + c.price * c.quantity, 0) * 100) / 100;
@@ -278,6 +303,10 @@ export default function POS() {
     if (cartItems.length === 0) { toast.error('ตะกร้าว่างเปล่า'); return; }
     const branchId = selectedBranch || user?.branchId;
     if (!branchId) { toast.error('กรุณาเลือกสาขา'); return; }
+    if (paymentMethod === 'BANK_TRANSFER' && !slipFile && !slipPreview) {
+      toast.error('กรุณาอัพโหลดสลิปการโอนเงินก่อนบันทึกบิล');
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -285,6 +314,7 @@ export default function POS() {
         discount: billDiscountAmt,
         discountPct: billDiscountPct,
         notes,
+        paymentMethod,
         items: cartItems.map((c) => ({
           itemId: c.itemId,
           quantity: c.quantity,
@@ -292,15 +322,28 @@ export default function POS() {
           discount: Math.round(c.discount * 100) / 100,
         })),
       };
+      let billId: string;
       let billNumber: string;
       if (editingBillId) {
         const { data } = await client.put(`/bills/${editingBillId}`, payload);
+        billId = data.id;
         billNumber = data.billNumber;
         toast.success(`แก้ไขบิล ${billNumber} เรียบร้อย`);
       } else {
         const { data } = await client.post('/bills', payload);
+        billId = data.id;
         billNumber = data.billNumber;
         toast.success(`บันทึกบิล: ${billNumber}`);
+      }
+      // Upload slip image if selected (bank transfer or any method that has a slip)
+      if (slipFile) {
+        try {
+          const fd = new FormData();
+          fd.append('slip', slipFile);
+          await client.post(`/bills/${billId}/slip`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        } catch {
+          toast.error('อัพโหลดสลิปไม่สำเร็จ แต่บิลถูกบันทึกแล้ว');
+        }
       }
       setLastSaved(billNumber);
       clearCart();
@@ -331,6 +374,11 @@ export default function POS() {
     const storedPct = parseFloat(String(bill.discountPct || 0));
     setBillDiscountPctStr(storedPct > 0 ? String(storedPct) : '');
     setCartItems(billItems);
+    setPaymentMethod((bill.paymentMethod as 'CASH' | 'BANK_TRANSFER') || 'CASH');
+    // Clear any pending slip when loading existing bill
+    setSlipFile(null);
+    if (slipPreview) URL.revokeObjectURL(slipPreview);
+    setSlipPreview(bill.slipUrl || null);
     setShowSummary(false);
     toast(`แก้ไขบิล ${bill.billNumber}`, { icon: '✏️' });
     setTimeout(() => inputRef.current?.focus(), 100);
@@ -684,6 +732,131 @@ export default function POS() {
               />
             </div>
           </div>
+        </div>
+
+        {/* Payment method + slip upload */}
+        <div className="card">
+          <h3 className="font-medium text-gray-700 mb-3">การชำระเงิน</h3>
+          {/* Toggle */}
+          <div className="flex gap-2 mb-3">
+            <button
+              type="button"
+              onClick={() => setPaymentMethod('CASH')}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border-2 text-sm font-medium transition-colors ${
+                paymentMethod === 'CASH'
+                  ? 'border-green-500 bg-green-50 text-green-700'
+                  : 'border-gray-200 text-gray-500 hover:border-gray-300'
+              }`}
+            >
+              <Banknote size={16} /> เงินสด
+            </button>
+            <button
+              type="button"
+              onClick={() => setPaymentMethod('BANK_TRANSFER')}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border-2 text-sm font-medium transition-colors ${
+                paymentMethod === 'BANK_TRANSFER'
+                  ? 'border-blue-500 bg-blue-50 text-blue-700'
+                  : 'border-gray-200 text-gray-500 hover:border-gray-300'
+              }`}
+            >
+              <CreditCard size={16} /> โอนเงิน
+            </button>
+          </div>
+
+          {/* Slip panel — always uploadable; bank transfer shows required badge */}
+          <div className={`rounded-xl border-2 border-dashed transition-colors ${
+            paymentMethod === 'BANK_TRANSFER'
+              ? 'border-blue-300 bg-blue-50/40'
+              : 'border-gray-200 bg-gray-50'
+          }`}>
+            {slipPreview ? (
+              <div className="p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-medium text-gray-500">
+                    {paymentMethod === 'BANK_TRANSFER' ? 'สลิปโอนเงิน' : 'สลิปแนบ (ไม่บังคับ)'}
+                  </p>
+                  {paymentMethod === 'BANK_TRANSFER' && (
+                    <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium">✓ แนบสลิปแล้ว</span>
+                  )}
+                </div>
+                <div className="relative group w-full">
+                  <img
+                    src={slipPreview}
+                    alt="สลิปโอนเงิน"
+                    className="w-full max-h-48 object-contain rounded-lg bg-white border border-blue-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={removeSlip}
+                    className="absolute top-1.5 right-1.5 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow"
+                    title="ลบสลิป"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+                <div className="flex gap-2 mt-2">
+                  <button type="button" onClick={() => slipFileRef.current?.click()}
+                    className="flex-1 text-xs text-blue-600 border border-blue-300 rounded-lg py-1.5 hover:bg-blue-50 flex items-center justify-center gap-1">
+                    <Upload size={12} /> เปลี่ยนรูป
+                  </button>
+                  <button type="button" onClick={removeSlip}
+                    className="text-xs text-red-500 border border-red-200 rounded-lg px-3 py-1.5 hover:bg-red-50">
+                    ลบ
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-4">
+                <div className="flex flex-col items-center justify-center gap-2 mb-3">
+                  <ImageIcon size={28} className={paymentMethod === 'BANK_TRANSFER' ? 'text-blue-300' : 'text-gray-300'} />
+                  <p className={`text-xs font-medium ${paymentMethod === 'BANK_TRANSFER' ? 'text-blue-500' : 'text-gray-400'}`}>
+                    {paymentMethod === 'BANK_TRANSFER' ? (
+                      <span className="flex items-center gap-1">
+                        แนบสลิปการโอนเงิน
+                        <span className="bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">จำเป็น</span>
+                      </span>
+                    ) : 'แนบสลิป (ไม่บังคับ)'}
+                  </p>
+                  <p className="text-[11px] text-gray-400">JPEG, PNG, WEBP — สูงสุด 10 MB</p>
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => slipFileRef.current?.click()}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      paymentMethod === 'BANK_TRANSFER'
+                        ? 'bg-blue-600 text-white hover:bg-blue-700'
+                        : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                    }`}>
+                    <Upload size={15} /> อัพโหลด
+                  </button>
+                  <button type="button" onClick={() => slipCameraRef.current?.click()}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border-2 text-sm font-medium transition-colors ${
+                      paymentMethod === 'BANK_TRANSFER'
+                        ? 'bg-white border-blue-300 text-blue-600 hover:bg-blue-50'
+                        : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
+                    }`}>
+                    <Camera size={15} /> ถ่ายรูป
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Hidden file inputs */}
+          <input
+            ref={slipFileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => handleSlipFileSelected(e.target.files?.[0] ?? null)}
+          />
+          <input
+            ref={slipCameraRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => handleSlipFileSelected(e.target.files?.[0] ?? null)}
+          />
         </div>
 
         {/* Daily Summary (collapsible) */}

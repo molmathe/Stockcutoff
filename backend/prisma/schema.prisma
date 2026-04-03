@@ -125,11 +125,13 @@ model Bill {
   discount    Decimal    @db.Decimal(10, 2) @default(0)
   discountPct Decimal    @db.Decimal(5, 2)  @default(0)
   total       Decimal    @db.Decimal(10, 2) @default(0)
-  notes       String?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  submittedAt DateTime?
-  items       BillItem[]
+  notes         String?
+  paymentMethod String     @default("CASH")   // "CASH" | "BANK_TRANSFER"
+  slipUrl       String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  submittedAt   DateTime?
+  items         BillItem[]
 
   @@index([userId])
   @@index([branchId, status, createdAt])
