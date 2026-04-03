@@ -154,6 +154,11 @@ jobs:
             printf '\nIMAGE_TAG=%s\n' "$IMAGE_TAG" >> .env
           fi
 
+          # Resolve any failed baseline migrations that fail because tables already exist
+          docker exec stockcutoff-postgres psql -U stockcutoff -d stockcutoff -c \
+            "UPDATE _prisma_migrations SET finished_at = NOW(), logs = NULL WHERE migration_name = '00000000000000_init' AND finished_at IS NULL;" \
+            2>/dev/null || true
+
           docker compose pull
           docker compose up -d --remove-orphans || {
             echo "=== docker compose up failed — backend logs ===" >&2
