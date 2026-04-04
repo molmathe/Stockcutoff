@@ -35,8 +35,12 @@ router.get('/export', authenticate, requireSuperAdmin, async (req: AuthRequest, 
   res.setHeader('Content-Type', 'application/gzip');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
-  // Use pg_dump and pipe to gzip, then to response
-  const pgDump = spawn('pg_dump', [dbUrl]);
+  // Parse DATABASE_URL into individual flags so credentials never appear in the process list
+  const url = new URL(dbUrl);
+  const pgEnv = { ...process.env, PGPASSWORD: decodeURIComponent(url.password) };
+  const pgArgs = ['-h', url.hostname, '-p', url.port || '5432', '-U', decodeURIComponent(url.username), '-d', url.pathname.slice(1)];
+
+  const pgDump = spawn('pg_dump', pgArgs, { env: pgEnv });
   const gzip = spawn('gzip');
 
   pgDump.stdout.pipe(gzip.stdin);
@@ -69,6 +73,14 @@ router.post('/import', authenticate, requireSuperAdmin, upload.single('file'), a
     return res.status(400).json({ error: 'No file uploaded' });
   }
 
+  // Strict file validation: only accept .sql.gz with gzip mimetype
+  const originalName = req.file.originalname.toLowerCase();
+  const mimeType = req.file.mimetype;
+  if (!originalName.endsWith('.sql.gz') || !['application/gzip', 'application/x-gzip'].includes(mimeType)) {
+    fs.unlinkSync(req.file.path);
+    return res.status(400).json({ error: 'Only .sql.gz files are accepted for database restore' });
+  }
+
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) {
     return res.status(500).json({ error: 'DATABASE_URL is not set' });
@@ -77,13 +89,13 @@ router.post('/import', authenticate, requireSuperAdmin, upload.single('file'), a
   const filePath = req.file.path;
 
   try {
-    // Restore using gunzip and psql
-    // We use --clean and --if-exists to drop existing objects if they are in the dump
-    // However, if the dump is just a standard pg_dump, we might need to drop the schema first
-    // For a more robust restore, we can drop and recreate the public schema
-    
+    // Parse DATABASE_URL into individual flags so credentials never appear in the process list
+    const url = new URL(dbUrl);
+    const pgEnv = { ...process.env, PGPASSWORD: decodeURIComponent(url.password) };
+    const pgArgs = ['-h', url.hostname, '-p', url.port || '5432', '-U', decodeURIComponent(url.username), '-d', url.pathname.slice(1)];
+
     const gunzip = spawn('gunzip', ['-c', filePath]);
-    const psql = spawn('psql', [dbUrl]);
+    const psql = spawn('psql', pgArgs, { env: pgEnv });
 
     gunzip.stdout.pipe(psql.stdin);
 
