@@ -26,7 +26,7 @@ export default function Database() {
       const a = document.createElement('a');
       a.href = url;
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      a.download = `stockcutoff_backup_${timestamp}.sql.gz`;
+      a.download = `stockcutoff_backup_${timestamp}.tar.gz`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -104,7 +104,7 @@ export default function Database() {
           </div>
           <h2 className="text-lg font-bold text-gray-900 mb-2">ส่งออกฐานข้อมูล (Export)</h2>
           <p className="text-sm text-gray-500 mb-6">
-            ดาวน์โหลดไฟล์สำรองข้อมูล (.sql.gz) ของระบบทั้งหมด เก็บไว้เพื่อความปลอดภัย
+            ดาวน์โหลดไฟล์สำรองข้อมูล (.tar.gz) รวมฐานข้อมูลและรูปภาพทั้งหมด เก็บไว้เพื่อความปลอดภัย
           </p>
           <button
             onClick={handleExport}
@@ -125,13 +125,13 @@ export default function Database() {
           </div>
           <h2 className="text-lg font-bold text-gray-900 mb-2">นำเข้าฐานข้อมูล (Import)</h2>
           <p className="text-sm text-gray-500 mb-6">
-            กู้คืนข้อมูลจากไฟล์สำรอง (.sql.gz) <span className="text-red-600 font-bold">คำเตือน: ข้อมูลปัจจุบันจะถูกแทนที่ทั้งหมด!</span>
+            กู้คืนข้อมูลจากไฟล์สำรอง (.tar.gz) รวมฐานข้อมูลและรูปภาพ <span className="text-red-600 font-bold">คำเตือน: ข้อมูลปัจจุบันจะถูกแทนที่ทั้งหมด!</span>
           </p>
           <label className="cursor-pointer">
             <input
               type="file"
               className="hidden"
-              accept=".sql.gz,.sql"
+              accept=".tar.gz"
               onChange={handleFileChange}
               disabled={exporting || importing}
             />
