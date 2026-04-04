@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import bcrypt from 'bcryptjs';
 import prisma from '../lib/prisma';
 import multer from 'multer';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
@@ -177,9 +178,32 @@ router.put('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Res
 // DELETE bulk (soft delete)
 router.delete('/bulk', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const { ids } = req.body;
-    await prisma.branch.updateMany({ where: { id: { in: ids }, deletedAt: null }, data: { deletedAt: new Date() } });
-    res.json({ message: `ลบ ${ids.length} สาขาเรียบร้อย` });
+    const { ids, password } = req.body;
+    if (!password) return res.status(400).json({ error: 'กรุณาระบุรหัสผ่านเพื่อยืนยัน' });
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'กรุณาระบุสาขาที่ต้องการลบ' });
+
+    // Re-authentication: verify the caller's own password before any deletion
+    const currentUser = await prisma.user.findUnique({ where: { id: req.user!.id } });
+    if (!currentUser || !(await bcrypt.compare(password, currentUser.password))) {
+      return res.status(403).json({ error: 'รหัสผ่านไม่ถูกต้อง' });
+    }
+
+    // Ownership check: BRANCH_ADMIN can only delete their own assigned branch
+    let targetIds = ids as string[];
+    if (req.user!.role === 'BRANCH_ADMIN') {
+      targetIds = ids.filter((id: string) => id === req.user!.branchId);
+      if (targetIds.length === 0) return res.status(403).json({ error: 'ไม่มีสิทธิ์ลบสาขาอื่น' });
+    }
+
+    await prisma.branch.updateMany({ where: { id: { in: targetIds }, deletedAt: null }, data: { deletedAt: new Date() } });
+    await logAudit({
+      userId: req.user!.id,
+      action: 'DELETE_BRANCH',
+      entity: 'Branch',
+      ip: getClientIp(req),
+      detail: { ids: targetIds, count: targetIds.length },
+    });
+    res.json({ message: `ลบ ${targetIds.length} สาขาเรียบร้อย` });
   } catch {
     res.status(500).json({ error: 'Server error' });
   }
@@ -188,8 +212,22 @@ router.delete('/bulk', authenticate, requireAdmin, async (req: AuthRequest, res:
 // DELETE single (soft delete)
 router.delete('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
+    const { password } = req.body;
+    if (!password) return res.status(400).json({ error: 'กรุณาระบุรหัสผ่านเพื่อยืนยัน' });
+
+    // Re-authentication: verify the caller's own password before deletion
+    const currentUser = await prisma.user.findUnique({ where: { id: req.user!.id } });
+    if (!currentUser || !(await bcrypt.compare(password, currentUser.password))) {
+      return res.status(403).json({ error: 'รหัสผ่านไม่ถูกต้อง' });
+    }
+
     const branch = await prisma.branch.findFirst({ where: { id: req.params.id, deletedAt: null } });
     if (!branch) return res.status(404).json({ error: 'ไม่พบสาขา' });
+
+    // Ownership check: BRANCH_ADMIN can only delete their own assigned branch
+    if (req.user!.role === 'BRANCH_ADMIN' && branch.id !== req.user!.branchId) {
+      return res.status(403).json({ error: 'ไม่มีสิทธิ์ลบสาขาอื่น' });
+    }
 
     await prisma.branch.update({ where: { id: req.params.id }, data: { deletedAt: new Date() } });
 

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
-import { FileText, ChevronDown, ChevronUp, X, Pencil, Plus, Trash2, Banknote, CreditCard, ZoomIn } from 'lucide-react';
+import { FileText, ChevronDown, ChevronUp, X, Pencil, Plus, Trash2, Banknote, CreditCard, ZoomIn, FileSpreadsheet } from 'lucide-react';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { BranchCombobox } from '../components/AutocompleteInputs';
@@ -63,7 +63,7 @@ export default function Bills() {
     enabled: isAdmin,
   });
 
-  const { data: bills = [], isLoading: loading } = useQuery<Bill[]>({
+  const { data: billsResponse, isLoading: loading } = useQuery<{ bills: Bill[]; truncated: boolean; totalCount: number }>({
     queryKey: ['bills', searchParams],
     queryFn: () => {
       const params: any = {};
@@ -74,6 +74,9 @@ export default function Bills() {
       return client.get('/bills', { params }).then((r) => r.data);
     },
   });
+  const bills = billsResponse?.bills ?? [];
+  const billsTruncated = billsResponse?.truncated ?? false;
+  const billsTotalCount = billsResponse?.totalCount ?? 0;
 
   const cancelMutation = useMutation({
     mutationFn: (id: string) => client.put(`/bills/${id}/cancel`),
@@ -247,6 +250,13 @@ export default function Bills() {
         </div>
       </div>
 
+      {/* Truncation warning */}
+      {billsTruncated && (
+        <div className="rounded-md bg-yellow-50 border border-yellow-200 px-4 py-2 text-sm text-yellow-800">
+          แสดงผล 500 รายการล่าสุด (ทั้งหมด {billsTotalCount.toLocaleString()} รายการ) — กรุณาเพิ่มตัวกรองเพื่อดูข้อมูลที่ต้องการ
+        </div>
+      )}
+
       {/* Bills list */}
       <div className="card p-0 overflow-hidden">
         {loading ? (
@@ -265,7 +275,11 @@ export default function Bills() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-medium text-gray-800">{bill.billNumber}</span>
                       <span className={statusBadge(bill.status)}>{statusLabel[bill.status] || bill.status}</span>
-                      {bill.paymentMethod === 'BANK_TRANSFER' ? (
+                      {bill.source === 'IMPORT' ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full">
+                          <FileSpreadsheet size={10} /> Report{bill.importPlatform ? ` (${bill.importPlatform})` : ''}
+                        </span>
+                      ) : bill.paymentMethod === 'BANK_TRANSFER' ? (
                         <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">
                           <CreditCard size={10} /> โอนเงิน
                           {bill.slipUrl && <span className="w-1.5 h-1.5 rounded-full bg-green-400 ml-0.5" title="มีสลิป" />}

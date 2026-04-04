@@ -107,17 +107,21 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
       }
     }
 
-    const bills = await prisma.bill.findMany({
-      where,
-      include: {
-        branch: { select: { id: true, name: true, code: true } },
-        user: { select: { id: true, name: true } },
-        items: { include: { item: { select: { id: true, name: true, sku: true, barcode: true, imageUrl: true } } } },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 500, // safety cap to prevent OOM on large datasets
-    });
-    res.json(bills);
+    const [bills, totalCount] = await Promise.all([
+      prisma.bill.findMany({
+        where,
+        include: {
+          branch: { select: { id: true, name: true, code: true } },
+          user: { select: { id: true, name: true } },
+          items: { include: { item: { select: { id: true, name: true, sku: true, barcode: true, imageUrl: true } } } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 500, // safety cap to prevent OOM on large datasets
+      }),
+      prisma.bill.count({ where }),
+    ]);
+    const truncated = totalCount > 500;
+    res.json({ bills, truncated, totalCount });
   } catch {
     res.status(500).json({ error: 'Server error' });
   }
@@ -235,7 +239,7 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
         items: { include: { item: true } },
       },
     });
-    logAudit({ userId: req.user!.id, action: 'CREATE_BILL', entity: 'Bill', entityId: bill.id, detail: { billNumber: bill.billNumber, subtotal, discount: totalDiscount, total, itemCount: billItems.length, branchId: targetBranch }, ip: getClientIp(req) });
+    await logAudit({ userId: req.user!.id, action: 'CREATE_BILL', entity: 'Bill', entityId: bill.id, detail: { billNumber: bill.billNumber, subtotal, discount: totalDiscount, total, itemCount: billItems.length, branchId: targetBranch }, ip: getClientIp(req) });
     res.status(201).json(bill);
   } catch (err: any) {
     if (err.status === 400) return res.status(400).json({ error: err.message });
@@ -350,18 +354,25 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
         subtotal: Number(bi.subtotal),
       })),
     };
+    // afterSnapshot uses data already fetched inside the transaction — no extra queries
     const afterSnapshot = {
       status: bill.status,
       subtotal,
       discount: totalDiscount,
       total,
       notes,
-      items: await Promise.all(billItems.map(async (bi) => {
-        const item = await prisma.item.findUnique({ where: { id: bi.itemId }, select: { name: true, sku: true, barcode: true } });
-        return { name: item?.name ?? '', sku: item?.sku ?? '', barcode: item?.barcode ?? '', quantity: bi.quantity, price: Number(bi.price), discount: Number(bi.discount), globalDiscount: Number(bi.globalDiscount), subtotal: Number(bi.subtotal) };
+      items: updated.items.map((bi: any) => ({
+        name: bi.item?.name ?? '',
+        sku: bi.item?.sku ?? '',
+        barcode: bi.item?.barcode ?? '',
+        quantity: bi.quantity,
+        price: Number(bi.price),
+        discount: Number(bi.discount),
+        globalDiscount: Number(bi.globalDiscount ?? 0),
+        subtotal: Number(bi.subtotal),
       })),
     };
-    logAudit({ userId: req.user!.id, action: 'EDIT_BILL', entity: 'Bill', entityId: bill.id, detail: { billNumber: bill.billNumber, before: beforeSnapshot, after: afterSnapshot }, ip: getClientIp(req) });
+    await logAudit({ userId: req.user!.id, action: 'EDIT_BILL', entity: 'Bill', entityId: bill.id, detail: { billNumber: bill.billNumber, before: beforeSnapshot, after: afterSnapshot }, ip: getClientIp(req) });
     res.json(updated);
   } catch (err: any) {
     if (err.status === 400) return res.status(400).json({ error: err.message });
@@ -428,7 +439,7 @@ router.put('/:id/cancel', authenticate, async (req: AuthRequest, res: Response) 
     }
 
     const updated = await prisma.bill.update({ where: { id: req.params.id }, data: { status: 'CANCELLED' } });
-    logAudit({ userId: req.user!.id, action: 'CANCEL_BILL', entity: 'Bill', entityId: bill.id, detail: { billNumber: bill.billNumber, total: Number(bill.total), previousStatus: bill.status }, ip: getClientIp(req) });
+    await logAudit({ userId: req.user!.id, action: 'CANCEL_BILL', entity: 'Bill', entityId: bill.id, detail: { billNumber: bill.billNumber, total: Number(bill.total), previousStatus: bill.status }, ip: getClientIp(req) });
     res.json(updated);
   } catch {
     res.status(500).json({ error: 'Server error' });
