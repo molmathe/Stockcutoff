@@ -21,7 +21,7 @@ export default function POSLogin() {
     inputRef.current?.focus();
   }, []);
 
-  if (user) return <Navigate to="/" replace />;
+  if (user && !showOpenBillsAlert) return <Navigate to="/" replace />;
 
   const handleKeyPress = (digit: string) => {
     if (pin.length < 4) setPin((p) => p + digit);
