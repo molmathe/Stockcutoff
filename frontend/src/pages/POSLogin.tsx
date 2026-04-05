@@ -2,7 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
-import { Hash, Delete, ShoppingCart, Building2, CheckCircle, XCircle } from 'lucide-react';
+import { Hash, Delete, ShoppingCart, Building2, CheckCircle, XCircle, AlertTriangle, FileText, CheckSquare } from 'lucide-react';
+import client from '../api/client';
+import type { Bill } from '../types';
 
 export default function POSLogin() {
   const { user, posLoginPreview, posLoginCommit } = useAuth();
@@ -10,6 +12,9 @@ export default function POSLogin() {
   const [pin, setPin] = useState('');
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<Awaited<ReturnType<typeof posLoginPreview>> | null>(null);
+  const [showOpenBillsAlert, setShowOpenBillsAlert] = useState(false);
+  const [openBills, setOpenBills] = useState<Bill[]>([]);
+  const [closingBillId, setClosingBillId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -42,13 +47,32 @@ export default function POSLogin() {
   const handleConfirm = () => {
     if (!preview) return;
     posLoginCommit(preview);
-    navigate('/pos');
+    if (preview.openBills.length > 0) {
+      setOpenBills(preview.openBills);
+      setPreview(null);
+      setShowOpenBillsAlert(true);
+    } else {
+      navigate('/pos');
+    }
   };
 
   const handleCancel = () => {
     setPreview(null);
     setPin('');
     setTimeout(() => inputRef.current?.focus(), 50);
+  };
+
+  const handleCloseBill = async (billId: string) => {
+    setClosingBillId(billId);
+    try {
+      await client.post(`/bills/${billId}/submit`);
+      setOpenBills((prev) => prev.filter((b) => b.id !== billId));
+      toast.success('ปิดบิลเรียบร้อย');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'ไม่สามารถปิดบิลได้');
+    } finally {
+      setClosingBillId(null);
+    }
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -58,6 +82,15 @@ export default function POSLogin() {
 
   const handleInputKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && pin.length === 4) handleLogin();
+  };
+
+  const formatDate = (dateStr: string) => {
+    const d = new Date(dateStr);
+    return d.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+  };
+
+  const formatTotal = (total: string) => {
+    return Number(total).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
 
   const digits = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];
@@ -173,6 +206,69 @@ export default function POSLogin() {
               >
                 <CheckCircle size={18} />
                 ถูกต้อง เข้าใช้งาน
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Open bills alert popup */}
+      {showOpenBillsAlert && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+            {/* Header */}
+            <div className="p-6 pb-4 border-b border-gray-100">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-orange-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                  <AlertTriangle className="text-orange-500" size={24} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900">มีรายการบิลยังเปิดอยู่</h2>
+                  <p className="text-sm text-gray-500">
+                    พบ {openBills.length} บิลที่ยังไม่ปิดใน 7 วันที่ผ่านมา
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Bill list */}
+            <div className="overflow-y-auto flex-1 p-4 space-y-2">
+              {openBills.length === 0 ? (
+                <div className="text-center py-6 text-gray-400">
+                  <CheckSquare size={32} className="mx-auto mb-2 text-green-400" />
+                  <p className="text-sm">ปิดบิลทั้งหมดแล้ว</p>
+                </div>
+              ) : (
+                openBills.map((bill) => (
+                  <div key={bill.id} className="flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-xl p-3">
+                    <div className="w-9 h-9 bg-orange-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                      <FileText size={16} className="text-orange-500" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-800 truncate">{bill.billNumber}</p>
+                      <p className="text-xs text-gray-500">{formatDate(bill.createdAt)}</p>
+                      <p className="text-xs text-orange-600 font-medium">฿{formatTotal(bill.total)}</p>
+                    </div>
+                    <button
+                      onClick={() => handleCloseBill(bill.id)}
+                      disabled={closingBillId === bill.id}
+                      className="flex-shrink-0 px-3 py-1.5 bg-orange-500 text-white text-xs font-semibold rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {closingBillId === bill.id ? 'กำลังปิด...' : 'ปิดบิล'}
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 pt-3 border-t border-gray-100">
+              <button
+                onClick={() => navigate('/pos')}
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors shadow-sm"
+              >
+                <ShoppingCart size={18} />
+                เข้าสู่ระบบ POS
               </button>
             </div>
           </div>

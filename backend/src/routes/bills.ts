@@ -380,6 +380,30 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   }
 });
 
+// POST /bills/:id/submit — submit (close) a single OPEN bill
+router.post('/:id/submit', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const bill = await prisma.bill.findUnique({ where: { id: req.params.id } });
+    if (!bill) return res.status(404).json({ error: 'ไม่พบบิล' });
+    if (bill.status !== 'OPEN') return res.status(400).json({ error: 'ปิดได้เฉพาะบิลที่ยังเปิดอยู่เท่านั้น' });
+
+    // CASHIER can only close bills of their own branch
+    if (req.user!.role === 'CASHIER' && bill.branchId !== req.user!.branchId) {
+      return res.status(403).json({ error: 'ไม่มีสิทธิ์ปิดบิลของสาขาอื่น' });
+    }
+
+    const updated = await prisma.bill.update({
+      where: { id: bill.id },
+      data: { status: 'SUBMITTED', submittedAt: new Date() },
+    });
+
+    logAudit({ userId: req.user!.id, action: 'SUBMIT_DAY', entity: 'Bill', entityId: bill.id, detail: { billNumber: bill.billNumber, single: true }, ip: getClientIp(req) });
+    res.json(updated);
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // POST /bills/submit-day — submit (close) all open bills for today
 router.post('/submit-day', authenticate, async (req: AuthRequest, res: Response) => {
   try {

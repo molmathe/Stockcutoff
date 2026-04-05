@@ -83,6 +83,22 @@ router.post('/pos-login', async (req: Request, res: Response) => {
       detail: { branch: branch.name }
     });
 
+    // Fetch open bills from the last 7 days for this branch
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const openBills = await prisma.bill.findMany({
+      where: {
+        branchId: branch.id,
+        status: 'OPEN',
+        createdAt: { gte: sevenDaysAgo },
+      },
+      include: {
+        items: true,
+        user: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
     res.json({
       token,
       user: {
@@ -94,6 +110,7 @@ router.post('/pos-login', async (req: Request, res: Response) => {
         branch: { id: branch.id, name: branch.name, code: branch.code },
         posMode: true,
       },
+      openBills,
     });
   } catch {
     res.status(500).json({ error: 'Server error' });

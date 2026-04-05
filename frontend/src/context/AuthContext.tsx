@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import client from '../api/client';
-import type { Branch } from '../types';
+import type { Bill, Branch } from '../types';
 
 interface AuthUser {
   id: string;
@@ -15,6 +15,7 @@ interface AuthUser {
 interface PosLoginPreview {
   user: AuthUser;
   token: string;
+  openBills: Bill[];
 }
 
 interface AuthCtx {
@@ -54,7 +55,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Step 1 — verify PIN and return preview (does NOT set user/token yet)
   const posLoginPreview = async (pincode: string): Promise<PosLoginPreview> => {
     const r = await client.post('/auth/pos-login', { pincode });
-    return { user: { ...r.data.user, posMode: true }, token: r.data.token };
+    return { user: { ...r.data.user, posMode: true }, token: r.data.token, openBills: r.data.openBills ?? [] };
   };
 
   // Step 2 — commit after user confirms branch
