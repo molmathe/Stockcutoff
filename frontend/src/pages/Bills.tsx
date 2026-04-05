@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
-import { FileText, ChevronDown, ChevronUp, X, Pencil, Plus, Trash2, Banknote, CreditCard, ZoomIn, FileSpreadsheet } from 'lucide-react';
+import { FileText, ChevronDown, ChevronUp, X, Pencil, Plus, Trash2, Banknote, CreditCard, ZoomIn, FileSpreadsheet, CheckSquare } from 'lucide-react';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { BranchCombobox } from '../components/AutocompleteInputs';
@@ -82,6 +82,12 @@ export default function Bills() {
     mutationFn: (id: string) => client.put(`/bills/${id}/cancel`),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['bills'] }); toast.success('ยกเลิกบิลเรียบร้อย'); },
     onError: () => toast.error('ยกเลิกบิลไม่สำเร็จ'),
+  });
+
+  const submitMutation = useMutation({
+    mutationFn: (id: string) => client.post(`/bills/${id}/submit`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bills'] }); toast.success('ปิดบิลเรียบร้อย'); },
+    onError: (e: any) => toast.error(e?.response?.data?.error || 'ปิดบิลไม่สำเร็จ'),
   });
 
   const deleteMutation = useMutation({
@@ -298,6 +304,18 @@ export default function Bills() {
                     <p className="text-sm font-bold">฿{Number(bill.total).toLocaleString('th-TH', { minimumFractionDigits: 2 })}</p>
                     <p className="text-xs text-gray-400">{bill.items.length} รายการ</p>
                   </div>
+                  {isAdmin && bill.status === 'OPEN' && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!confirm(`ยืนยันการปิดบิล ${bill.billNumber}?\n\nบิลจะถูกบันทึกเป็น "ส่งแล้ว"`)) return;
+                        submitMutation.mutate(bill.id);
+                      }}
+                      disabled={submitMutation.isPending}
+                      className="text-green-500 hover:text-green-700 shrink-0 disabled:opacity-40" title="ปิดบิล">
+                      <CheckSquare size={16} />
+                    </button>
+                  )}
                   {(bill.status === 'OPEN' || (isSuperAdmin && bill.status === 'SUBMITTED')) && (
                     <button
                       onClick={(e) => {

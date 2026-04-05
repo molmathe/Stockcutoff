@@ -387,8 +387,8 @@ router.post('/:id/submit', authenticate, async (req: AuthRequest, res: Response)
     if (!bill) return res.status(404).json({ error: 'ไม่พบบิล' });
     if (bill.status !== 'OPEN') return res.status(400).json({ error: 'ปิดได้เฉพาะบิลที่ยังเปิดอยู่เท่านั้น' });
 
-    // CASHIER can only close bills of their own branch
-    if (req.user!.role === 'CASHIER' && bill.branchId !== req.user!.branchId) {
+    // CASHIER and BRANCH_ADMIN can only close bills of their own branch
+    if (req.user!.role !== 'SUPER_ADMIN' && bill.branchId !== req.user!.branchId) {
       return res.status(403).json({ error: 'ไม่มีสิทธิ์ปิดบิลของสาขาอื่น' });
     }
 
