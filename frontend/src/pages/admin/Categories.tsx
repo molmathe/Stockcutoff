@@ -1,10 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Plus, Pencil, Trash2, Tag } from 'lucide-react';
+import { Plus, Pencil, Trash2, Tag, Download, Upload } from 'lucide-react';
 import client from '../../api/client';
 import Modal from '../../components/Modal';
 import type { Category } from '../../types';
+
+const exportCsv = (cats: Category[]) => {
+  const lines = ['name', ...cats.map((c) => `"${c.name.replace(/"/g, '""')}"`)];
+  const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `หมวดหมู่-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
 
 export default function Categories() {
   const qc = useQueryClient();
@@ -12,6 +23,7 @@ export default function Categories() {
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Category | null>(null);
   const [name, setName] = useState('');
+  const importRef = useRef<HTMLInputElement>(null);
 
   const { data: categories = [], isLoading } = useQuery<Category[]>({
     queryKey: ['categories'],
@@ -43,6 +55,32 @@ export default function Categories() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['categories'] }); setSelected([]); toast.success('ลบเรียบร้อย'); },
     onError: () => toast.error('ลบหลายรายการไม่สำเร็จ'),
   });
+
+  const importMutation = useMutation({
+    mutationFn: (names: string[]) => client.post('/categories/import', { names }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['categories'] });
+      const { created, total } = res.data;
+      const skipped = total - created;
+      toast.success(`นำเข้าสำเร็จ ${created} หมวดหมู่${skipped > 0 ? ` (ข้าม ${skipped} ซ้ำ)` : ''}`);
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error || 'นำเข้าไม่สำเร็จ'),
+  });
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = (ev.target?.result as string).replace(/^\uFEFF/, '');
+      const lines = text.split(/\r?\n/).map((l) => l.trim().replace(/^"|"$/g, '').trim()).filter(Boolean);
+      const names = lines[0]?.toLowerCase() === 'name' ? lines.slice(1) : lines;
+      if (names.length === 0) { toast.error('ไม่พบข้อมูลในไฟล์'); return; }
+      importMutation.mutate(names);
+    };
+    reader.readAsText(file, 'utf-8');
+    e.target.value = '';
+  };
 
   const openAdd = () => { setEditing(null); setName(''); setShowModal(true); };
   const openEdit = (c: Category) => { setEditing(c); setName(c.name); setShowModal(true); };
@@ -76,12 +114,19 @@ export default function Categories() {
           <Tag className="text-blue-600" size={22} />
           <h1 className="text-xl font-bold text-gray-800">จัดการหมวดหมู่</h1>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           {selected.length > 0 && (
             <button onClick={handleBulkDelete} className="btn-danger flex items-center gap-1">
               <Trash2 size={16} /> ลบ ({selected.length})
             </button>
           )}
+          <button onClick={() => exportCsv(categories)} className="btn-secondary flex items-center gap-1" title="ส่งออก CSV">
+            <Download size={16} /> ส่งออก
+          </button>
+          <button onClick={() => importRef.current?.click()} disabled={importMutation.isPending} className="btn-secondary flex items-center gap-1" title="นำเข้าจาก CSV">
+            <Upload size={16} /> {importMutation.isPending ? 'กำลังนำเข้า...' : 'นำเข้า'}
+          </button>
+          <input ref={importRef} type="file" accept=".csv" className="hidden" onChange={handleImportFile} />
           <button onClick={openAdd} className="btn-primary flex items-center gap-1">
             <Plus size={16} /> เพิ่มหมวดหมู่
           </button>

@@ -402,7 +402,7 @@ export default function POS() {
   const openBills = summary?.bills.filter((b) => b.status === 'OPEN') ?? [];
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4">
+    <div className="flex flex-col lg:flex-row gap-4 items-start">
       {scanning && (
         <BarcodeScanner
           onScan={lookupBarcode}
@@ -419,16 +419,31 @@ export default function POS() {
             </div>
             <h2 className="text-xl font-bold text-gray-900 mb-1">ไม่พบสินค้า</h2>
             <p className="text-sm text-gray-500 mb-3">ไม่พบสินค้าสำหรับบาร์โค้ด</p>
-            <div className="bg-gray-100 rounded-lg px-4 py-2 mb-5 font-mono text-gray-700 text-sm break-all">
-              {notFoundBarcode}
-            </div>
+            <div className="bg-gray-100 rounded-lg px-4 py-2 mb-5 font-mono text-gray-700 text-sm break-all">{notFoundBarcode}</div>
             <p className="text-sm text-red-600 font-medium mb-6">กรุณาติดต่อผู้ดูแลระบบ</p>
             <button
               onClick={() => { setNotFoundBarcode(null); setTimeout(() => inputRef.current?.focus(), 50); }}
               className="w-full py-3 rounded-xl bg-gray-800 text-white font-semibold hover:bg-gray-900 transition-colors"
-            >
-              ปิด
-            </button>
+            >ปิด</button>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Blocked Barcode Modal ===== */}
+      {blockedBarcode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8 text-center">
+            <div className="w-16 h-16 bg-orange-100 rounded-2xl mx-auto flex items-center justify-center mb-4">
+              <ShieldAlert className="text-orange-500" size={32} />
+            </div>
+            <h2 className="text-xl font-bold text-gray-900 mb-1">บาร์โค้ดไม่ถูกต้อง</h2>
+            <p className="text-sm text-gray-500 mb-3">บาร์โค้ดนี้ถูกระงับการใช้งาน</p>
+            <div className="bg-orange-50 border border-orange-200 rounded-lg px-4 py-2 mb-5 font-mono text-orange-700 text-sm break-all">{blockedBarcode}</div>
+            <p className="text-base font-semibold text-orange-600 mb-6">กรุณาสแกนบาร์โค้ดสินค้าอีกครั้ง</p>
+            <button
+              onClick={() => { setBlockedBarcode(null); setTimeout(() => inputRef.current?.focus(), 50); }}
+              className="w-full py-3 rounded-xl bg-orange-500 text-white font-semibold hover:bg-orange-600 transition-colors"
+            >รับทราบ</button>
           </div>
         </div>
       )}
@@ -488,619 +503,185 @@ export default function POS() {
         </div>
       )}
 
-      {/* ===== Blocked Barcode Modal ===== */}
-      {blockedBarcode && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8 text-center">
-            <div className="w-16 h-16 bg-orange-100 rounded-2xl mx-auto flex items-center justify-center mb-4">
-              <ShieldAlert className="text-orange-500" size={32} />
-            </div>
-            <h2 className="text-xl font-bold text-gray-900 mb-1">บาร์โค้ดไม่ถูกต้อง</h2>
-            <p className="text-sm text-gray-500 mb-3">บาร์โค้ดนี้ถูกระงับการใช้งาน</p>
-            <div className="bg-orange-50 border border-orange-200 rounded-lg px-4 py-2 mb-5 font-mono text-orange-700 text-sm break-all">
-              {blockedBarcode}
-            </div>
-            <p className="text-base font-semibold text-orange-600 mb-6">
-              กรุณาสแกนบาร์โค้ดสินค้าอีกครั้ง
-            </p>
-            <button
-              onClick={() => { setBlockedBarcode(null); setTimeout(() => inputRef.current?.focus(), 50); }}
-              className="w-full py-3 rounded-xl bg-orange-500 text-white font-semibold hover:bg-orange-600 transition-colors"
-            >
-              รับทราบ
-            </button>
-          </div>
-        </div>
-      )}
+      {/* ===== Left column: Search + Cart ===== */}
+      <div className="flex flex-col gap-4 w-full lg:w-1/2">
 
-      {/* ===== Search Results Modal ===== */}
-      {showSearchModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col" style={{ maxHeight: '85vh' }}>
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
-              <div>
-                <h2 className="text-lg font-bold text-gray-900">ผลการค้นหาสินค้า</h2>
-                <p className="text-sm text-gray-400 mt-0.5">
-                  ค้นหา: <span className="font-mono text-gray-600">{searchModalTerm}</span>
-                </p>
-              </div>
-              <button
-                onClick={() => { setShowSearchModal(false); setTimeout(() => inputRef.current?.focus(), 50); }}
-                className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            {/* Body */}
-            <div className="overflow-y-auto flex-1 px-4 py-3">
-              {searchModalLoading ? (
-                <div className="flex items-center justify-center py-16">
-                  <RefreshCw size={24} className="animate-spin text-blue-400" />
-                </div>
-              ) : searchModalResults.length === 0 ? (
-                <div className="text-center py-16 text-gray-400">
-                  <Search size={40} className="mx-auto mb-3 opacity-30" />
-                  <p className="font-medium">ไม่พบสินค้า</p>
-                  <p className="text-sm mt-1">ลองค้นหาด้วย SKU หรือบาร์โค้ดอื่น</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <p className="text-xs text-gray-400 mb-3">พบ {searchModalResults.length} รายการ — คลิกเพื่อเพิ่มลงตะกร้า</p>
-                  {searchModalResults.map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => {
-                        addToCart(item);
-                        setShowSearchModal(false);
-                        setBarcodeInput('');
-                        setTimeout(() => inputRef.current?.focus(), 50);
-                      }}
-                      className="w-full flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:border-blue-300 hover:bg-blue-50 transition-colors text-left"
-                    >
-                      {item.imageUrl ? (
-                        <img src={item.imageUrl} alt="" className="w-12 h-12 rounded-lg object-cover shrink-0" />
-                      ) : (
-                        <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center text-[10px] text-gray-400 shrink-0 font-mono">
-                          {item.sku.slice(0, 4)}
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-gray-900 truncate">{item.name}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">SKU: {item.sku}</p>
-                        <p className="text-xs text-gray-400">Barcode: {item.barcode}</p>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <p className="font-bold text-blue-700 text-base">฿{parseFloat(String(item.defaultPrice)).toLocaleString('th-TH')}</p>
-                        <p className="text-[11px] text-blue-400 mt-0.5">แตะเพื่อเพิ่ม</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ===== Left panel ===== */}
-      <div className="lg:w-1/2 space-y-4">
-
-        {/* Scanner card */}
-        <div className="card">
-          <h2 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
-            <ShoppingCart size={18} /> หน้าขาย (POS)
-            {editingBillId && (
-              <span className="ml-auto text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full flex items-center gap-1">
-                <Pencil size={11} /> กำลังแก้ไขบิล
-              </span>
-            )}
-          </h2>
-
-          {isAdmin && (
-            <div className="mb-3">
-              <label className="label">สาขา</label>
-              <BranchCombobox
-                value={selectedBranch}
-                onChange={setSelectedBranch}
-                branches={branches}
-              />
-            </div>
+      {/* ===== STEP 1: Search product ===== */}
+      <div className="card">
+        <h2 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
+          <ShoppingCart size={18} /> หน้าขาย (POS)
+          {editingBillId && (
+            <span className="ml-auto text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+              <Pencil size={11} /> กำลังแก้ไขบิล
+            </span>
           )}
+        </h2>
 
-          <label className="label">สแกน / ค้นหาสินค้า</label>
-          <div className="relative">
-            <div className="flex gap-2">
-              <input
-                ref={inputRef}
-                type="text"
-                value={barcodeInput}
-                onChange={handleBarcodeChange}
-                onKeyDown={handleBarcodeKeyDown}
-                onFocus={() => barcodeInput.length >= 2 && suggestions.length > 0 && setShowSuggestions(true)}
-                className="input flex-1"
-                placeholder="สแกนหรือพิมพ์ SKU / บาร์โค้ด…"
-                autoComplete="off"
-              />
-              <button
-                onClick={() => openSearchPopup(barcodeInput)}
-                className="btn-primary px-3"
-                title="ค้นหาและแสดงรายการ"
-              >
-                <Search size={18} />
-              </button>
-              <button onClick={() => setScanning(true)} className="btn-secondary px-3" title="สแกนด้วยกล้อง">
-                <Camera size={18} />
-              </button>
-            </div>
-
-            {/* Suggestion dropdown */}
-            {showSuggestions && suggestions.length > 0 && (
-              <div
-                ref={suggestRef}
-                className="absolute top-full left-0 right-12 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-30 overflow-hidden"
-              >
-                {suggestions.map((item, idx) => (
-                  <button
-                    key={item.id}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      addToCart(item);
-                      setBarcodeInput('');
-                      setShowSuggestions(false);
-                      setSuggestions([]);
-                      setTimeout(() => inputRef.current?.focus(), 50);
-                    }}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-blue-50 transition-colors border-b border-gray-50 last:border-0 ${
-                      idx === selectedSuggestion ? 'bg-blue-50' : ''
-                    }`}
-                  >
-                    {item.imageUrl ? (
-                      <img src={item.imageUrl} alt="" className="w-8 h-8 rounded-lg object-cover shrink-0" />
-                    ) : (
-                      <div className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center text-[9px] text-gray-400 shrink-0 font-mono">
-                        {item.sku.slice(0, 4)}
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
-                      <p className="text-[11px] text-gray-400 truncate">{item.sku} · {item.barcode}</p>
-                    </div>
-                    <span className="text-sm font-semibold text-blue-700 shrink-0">
-                      ฿{parseFloat(String(item.defaultPrice)).toLocaleString('th-TH')}
-                    </span>
-                  </button>
-                ))}
-                <div className="px-3 py-1.5 bg-gray-50 border-t border-gray-100">
-                  <p className="text-[11px] text-gray-400">↑↓ เลือก · Enter ยืนยัน · Esc ปิด</p>
-                </div>
-              </div>
-            )}
-          </div>
-          <p className="text-xs text-gray-400 mt-1">เครื่องสแกน USB จะส่งข้อมูลอัตโนมัติเมื่อกด Enter</p>
-        </div>
-
-        {/* Last saved notification */}
-        {lastSaved && (
-          <div className="card border-green-200 bg-green-50 flex items-center gap-3">
-            <CheckCircle className="text-green-600 shrink-0" size={20} />
-            <div>
-              <p className="text-sm font-medium text-green-700">บันทึกบิลเรียบร้อย</p>
-              <p className="text-xs text-green-600">{lastSaved}</p>
-            </div>
-            <button onClick={() => setLastSaved(null)} className="ml-auto text-green-400 hover:text-green-600">
-              <X size={16} />
-            </button>
+        {isAdmin && (
+          <div className="mb-3">
+            <label className="label">สาขา</label>
+            <BranchCombobox value={selectedBranch} onChange={setSelectedBranch} branches={branches} />
           </div>
         )}
 
-        {/* Bill options */}
-        <div className="card">
-          <h3 className="font-medium text-gray-700 mb-2">ตัวเลือกบิล</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="label">ส่วนลดบิล (%)</label>
-              <div className="relative">
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={billDiscountPctStr}
-                  maxLength={2}
-                  onChange={(e) => {
-                    const v = e.target.value.replace(/\D/g, '');
-                    const n = parseInt(v) || 0;
-                    setBillDiscountPctStr(n > 99 ? '99' : v);
+        <label className="label">สแกน / ค้นหาสินค้า</label>
+        <div className="relative">
+          <div className="flex gap-2">
+            <input
+              ref={inputRef}
+              type="text"
+              value={barcodeInput}
+              onChange={handleBarcodeChange}
+              onKeyDown={handleBarcodeKeyDown}
+              onFocus={() => barcodeInput.length >= 2 && suggestions.length > 0 && setShowSuggestions(true)}
+              className="input flex-1"
+              placeholder="สแกนหรือพิมพ์ SKU / บาร์โค้ด…"
+              autoComplete="off"
+            />
+            <button onClick={() => openSearchPopup(barcodeInput)} className="btn-primary px-3" title="ค้นหาและแสดงรายการ">
+              <Search size={18} />
+            </button>
+            <button onClick={() => setScanning(true)} className="btn-secondary px-3" title="สแกนด้วยกล้อง">
+              <Camera size={18} />
+            </button>
+          </div>
+
+          {/* Suggestion dropdown */}
+          {showSuggestions && suggestions.length > 0 && (
+            <div ref={suggestRef} className="absolute top-full left-0 right-12 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-30 overflow-hidden">
+              {suggestions.map((item, idx) => (
+                <button
+                  key={item.id}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    addToCart(item);
+                    setBarcodeInput('');
+                    setShowSuggestions(false);
+                    setSuggestions([]);
+                    setTimeout(() => inputRef.current?.focus(), 50);
                   }}
-                  className="input pr-8"
-                  placeholder="0"
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-semibold text-sm">%</span>
-              </div>
-              {billDiscountPct > 0 && (
-                <p className="text-xs text-orange-600 mt-0.5">= -฿{fmt(billDiscountAmt)}</p>
-              )}
-            </div>
-            <div>
-              <label className="label">หมายเหตุ</label>
-              <input
-                type="text"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="input"
-                placeholder="หมายเหตุ (ถ้ามี)"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Payment method + slip upload */}
-        <div className="card">
-          <h3 className="font-medium text-gray-700 mb-3">การชำระเงิน</h3>
-          {/* Toggle */}
-          <div className="flex gap-2 mb-3">
-            <button
-              type="button"
-              onClick={() => setPaymentMethod('CASH')}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border-2 text-sm font-medium transition-colors ${
-                paymentMethod === 'CASH'
-                  ? 'border-green-500 bg-green-50 text-green-700'
-                  : 'border-gray-200 text-gray-500 hover:border-gray-300'
-              }`}
-            >
-              <Banknote size={16} /> เงินสด
-            </button>
-            <button
-              type="button"
-              onClick={() => setPaymentMethod('BANK_TRANSFER')}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border-2 text-sm font-medium transition-colors ${
-                paymentMethod === 'BANK_TRANSFER'
-                  ? 'border-blue-500 bg-blue-50 text-blue-700'
-                  : 'border-gray-200 text-gray-500 hover:border-gray-300'
-              }`}
-            >
-              <CreditCard size={16} /> โอนเงิน
-            </button>
-          </div>
-
-          {/* Slip panel — always uploadable; bank transfer shows required badge */}
-          <div className={`rounded-xl border-2 border-dashed transition-colors ${
-            paymentMethod === 'BANK_TRANSFER'
-              ? 'border-blue-300 bg-blue-50/40'
-              : 'border-gray-200 bg-gray-50'
-          }`}>
-            {slipPreview ? (
-              <div className="p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-medium text-gray-500">
-                    {paymentMethod === 'BANK_TRANSFER' ? 'สลิปโอนเงิน' : 'สลิปแนบ (ไม่บังคับ)'}
-                  </p>
-                  {paymentMethod === 'BANK_TRANSFER' && (
-                    <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium">✓ แนบสลิปแล้ว</span>
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-blue-50 transition-colors border-b border-gray-50 last:border-0 ${idx === selectedSuggestion ? 'bg-blue-50' : ''}`}
+                >
+                  {item.imageUrl ? (
+                    <img src={item.imageUrl} alt="" className="w-8 h-8 rounded-lg object-cover shrink-0" />
+                  ) : (
+                    <div className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center text-[9px] text-gray-400 shrink-0 font-mono">{item.sku.slice(0, 4)}</div>
                   )}
-                </div>
-                <div className="relative group w-full">
-                  <img
-                    src={slipPreview}
-                    alt="สลิปโอนเงิน"
-                    className="w-full max-h-48 object-contain rounded-lg bg-white border border-blue-100"
-                  />
-                  <button
-                    type="button"
-                    onClick={removeSlip}
-                    className="absolute top-1.5 right-1.5 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow"
-                    title="ลบสลิป"
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-                <div className="flex gap-2 mt-2">
-                  <button type="button" onClick={() => slipFileRef.current?.click()}
-                    className="flex-1 text-xs text-blue-600 border border-blue-300 rounded-lg py-1.5 hover:bg-blue-50 flex items-center justify-center gap-1">
-                    <Upload size={12} /> เปลี่ยนรูป
-                  </button>
-                  <button type="button" onClick={removeSlip}
-                    className="text-xs text-red-500 border border-red-200 rounded-lg px-3 py-1.5 hover:bg-red-50">
-                    ลบ
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="p-4">
-                <div className="flex flex-col items-center justify-center gap-2 mb-3">
-                  <ImageIcon size={28} className={paymentMethod === 'BANK_TRANSFER' ? 'text-blue-300' : 'text-gray-300'} />
-                  <p className={`text-xs font-medium ${paymentMethod === 'BANK_TRANSFER' ? 'text-blue-500' : 'text-gray-400'}`}>
-                    {paymentMethod === 'BANK_TRANSFER' ? (
-                      <span className="flex items-center gap-1">
-                        แนบสลิปการโอนเงิน
-                        <span className="bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">จำเป็น</span>
-                      </span>
-                    ) : 'แนบสลิป (ไม่บังคับ)'}
-                  </p>
-                  <p className="text-[11px] text-gray-400">JPEG, PNG, WEBP — สูงสุด 10 MB</p>
-                </div>
-                <div className="flex gap-2">
-                  <button type="button" onClick={() => slipFileRef.current?.click()}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      paymentMethod === 'BANK_TRANSFER'
-                        ? 'bg-blue-600 text-white hover:bg-blue-700'
-                        : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
-                    }`}>
-                    <Upload size={15} /> อัพโหลด
-                  </button>
-                  <button type="button" onClick={() => slipCameraRef.current?.click()}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border-2 text-sm font-medium transition-colors ${
-                      paymentMethod === 'BANK_TRANSFER'
-                        ? 'bg-white border-blue-300 text-blue-600 hover:bg-blue-50'
-                        : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
-                    }`}>
-                    <Camera size={15} /> ถ่ายรูป
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Hidden file inputs */}
-          <input
-            ref={slipFileRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => handleSlipFileSelected(e.target.files?.[0] ?? null)}
-          />
-          <input
-            ref={slipCameraRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={(e) => handleSlipFileSelected(e.target.files?.[0] ?? null)}
-          />
-        </div>
-
-        {/* Daily Summary (collapsible) */}
-        <div className="card p-0 overflow-hidden">
-          <button
-            onClick={() => { setShowSummary(!showSummary); if (!showSummary) loadSummary(); }}
-            className="w-full px-4 py-3 flex items-center gap-2 hover:bg-gray-50 transition-colors text-left"
-          >
-            <BarChart3 size={16} className="text-blue-600 shrink-0" />
-            <span className="font-medium text-gray-700 text-sm">สรุปยอดขายวันนี้</span>
-            {summary && !loadingSummary && (
-              <span className="ml-auto text-xs text-gray-500 shrink-0">
-                {summary.totalBills} บิล · ฿{fmt(summary.totalRevenue + summary.openRevenue)}
-              </span>
-            )}
-            {loadingSummary && <RefreshCw size={13} className="ml-auto animate-spin text-gray-400" />}
-            <span className="text-gray-400 text-xs ml-1">{showSummary ? '▲' : '▼'}</span>
-          </button>
-
-          {showSummary && (
-            <div className="border-t px-4 pb-4 space-y-3">
-              {/* Stats row */}
-              <div className="flex items-center gap-3 pt-3">
-                <div className="grid grid-cols-3 gap-3 flex-1">
-                  <div className="text-center bg-gray-50 rounded-lg py-2">
-                    <p className="text-xl font-bold text-gray-800">{summary?.totalBills ?? 0}</p>
-                    <p className="text-xs text-gray-500">บิลทั้งหมด</p>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
+                    <p className="text-[11px] text-gray-400 truncate">{item.sku} · {item.barcode}</p>
                   </div>
-                  <div className="text-center bg-orange-50 rounded-lg py-2">
-                    <p className="text-xl font-bold text-orange-600">{summary?.openBills ?? 0}</p>
-                    <p className="text-xs text-gray-500">บิลเปิด</p>
-                  </div>
-                  <div className="bg-blue-50 rounded-lg py-2 px-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-yellow-600">ยังไม่ปิด</span>
-                      <span className="text-xs font-semibold text-yellow-700">฿{fmt(summary?.openRevenue ?? 0)}</span>
-                    </div>
-                    <div className="border-t border-blue-100 mt-1 pt-1 flex items-center justify-between">
-                      <span className="text-[10px] text-gray-500">รายได้รวม</span>
-                      <span className="text-xs font-bold text-blue-700">฿{fmt((summary?.totalRevenue ?? 0) + (summary?.openRevenue ?? 0))}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={loadSummary}
-                  disabled={loadingSummary}
-                  className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1 border border-gray-200 rounded px-2 py-1"
-                >
-                  <RefreshCw size={13} className={loadingSummary ? 'animate-spin' : ''} />
-                  รีเฟรช
+                  <span className="text-sm font-semibold text-blue-700 shrink-0">฿{parseFloat(String(item.defaultPrice)).toLocaleString('th-TH')}</span>
                 </button>
-                <button
-                  onClick={closeDay}
-                  disabled={closingDay || !summary?.openBills}
-                  className="btn-danger text-xs flex items-center gap-1 py-1 px-3 ml-auto"
-                >
-                  <Lock size={13} />
-                  {closingDay ? 'กำลังปิดวัน...' : 'ปิดวัน'}
-                </button>
+              ))}
+              <div className="px-3 py-1.5 bg-gray-50 border-t border-gray-100">
+                <p className="text-[11px] text-gray-400">↑↓ เลือก · Enter ยืนยัน · Esc ปิด</p>
               </div>
-
-              {/* Open bills list (editable) */}
-              {openBills.length > 0 ? (
-                <div>
-                  <p className="text-xs font-semibold text-gray-600 mb-2">บิลที่เปิดอยู่ (กดแก้ไขเพื่อโหลดเข้าตะกร้า)</p>
-                  <div className="space-y-1.5 max-h-52 overflow-y-auto">
-                    {openBills.map((bill) => (
-                      <div
-                        key={bill.id}
-                        className="flex items-center justify-between bg-orange-50 border border-orange-100 rounded-lg px-3 py-2"
-                      >
-                        <div>
-                          <p className="text-xs font-mono font-semibold text-gray-700">{bill.billNumber}</p>
-                          <p className="text-xs text-gray-500">
-                            {bill.items.length} รายการ · ฿{fmt(parseFloat(String(bill.total)))}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => loadBillForEdit(bill)}
-                            className="text-xs bg-orange-100 text-orange-700 hover:bg-orange-200 rounded px-2.5 py-1 flex items-center gap-1 transition-colors"
-                          >
-                            <Pencil size={12} /> แก้ไข
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (!confirm(`ยืนยันการยกเลิกบิล ${bill.billNumber}?\n\nการกระทำนี้ไม่สามารถย้อนกลับได้`)) return;
-                              client.put(`/bills/${bill.id}/cancel`).then(() => {
-                                if (editingBillId === bill.id) clearCart();
-                                loadSummary();
-                                toast.success(`ยกเลิกบิล ${bill.billNumber} เรียบร้อย`);
-                              }).catch(() => toast.error('ยกเลิกบิลไม่สำเร็จ'));
-                            }}
-                            className="text-xs bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded px-2 py-1 flex items-center gap-1 transition-colors"
-                            title="ยกเลิกบิล"
-                          >
-                            <X size={11} /> ยกเลิก
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : summary && (
-                <p className="text-xs text-gray-400 text-center py-2 bg-gray-50 rounded-lg">
-                  ไม่มีบิลที่เปิดอยู่ในวันนี้
-                </p>
-              )}
             </div>
           )}
         </div>
+        <p className="text-xs text-gray-400 mt-1">เครื่องสแกน USB จะส่งข้อมูลอัตโนมัติเมื่อกด Enter</p>
       </div>
 
-      {/* ===== Right: Cart ===== */}
-      <div className="lg:w-1/2 flex flex-col">
-        <div className="card flex flex-col">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-gray-700">
-              ตะกร้าสินค้า ({cartItems.length} รายการ)
-            </h3>
-            {cartItems.length > 0 && (
-              <button onClick={clearCart} className="text-xs text-red-500 hover:text-red-700">ล้างตะกร้า</button>
-            )}
+      {/* Last saved notification */}
+      {lastSaved && (
+        <div className="card border-green-200 bg-green-50 flex items-center gap-3">
+          <CheckCircle className="text-green-600 shrink-0" size={20} />
+          <div>
+            <p className="text-sm font-medium text-green-700">บันทึกบิลเรียบร้อย</p>
+            <p className="text-xs text-green-600">{lastSaved}</p>
           </div>
+          <button onClick={() => setLastSaved(null)} className="ml-auto text-green-400 hover:text-green-600"><X size={16} /></button>
+        </div>
+      )}
 
-          {cartItems.length === 0 ? (
-            <div className="flex items-center justify-center text-gray-300 py-12">
-              <div className="text-center">
-                <ShoppingCart size={48} className="mx-auto mb-2" />
-                <p className="text-sm">สแกนสินค้าเพื่อเพิ่มในตะกร้า</p>
-              </div>
+      {/* ===== STEP 2: Cart ===== */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-gray-700">ตะกร้าสินค้า ({cartItems.length} รายการ)</h3>
+          {cartItems.length > 0 && (
+            <button onClick={clearCart} className="text-xs text-red-500 hover:text-red-700">ล้างตะกร้า</button>
+          )}
+        </div>
+
+        {cartItems.length === 0 ? (
+          <div className="flex items-center justify-center text-gray-300 py-12">
+            <div className="text-center">
+              <ShoppingCart size={48} className="mx-auto mb-2" />
+              <p className="text-sm">สแกนสินค้าเพื่อเพิ่มในตะกร้า</p>
             </div>
-          ) : (
-            <div className="space-y-2">
-              {cartItems.map((item) => {
-                const lineSubtotal = Math.round((item.price * item.quantity - item.discount) * 100) / 100;
-                const effectiveLineTotal = Math.round(lineSubtotal * (1 - billDiscountPct / 100) * 100) / 100;
-                const effectivePricePerUnit = item.quantity > 0 ? Math.round(effectiveLineTotal / item.quantity * 100) / 100 : 0;
-                const isItemFree = item.price === 0 || effectiveLineTotal <= 0.001;
-                return (
-                <div
-                  key={item.itemId}
-                  className={`p-2.5 rounded-lg border space-y-2 ${isItemFree ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-100'}`}
-                >
-                  {/* Row 1: Image + Name/SKU + badges + Delete */}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {cartItems.map((item) => {
+              const lineSubtotal = Math.round((item.price * item.quantity - item.discount) * 100) / 100;
+              const effectiveLineTotal = Math.round(lineSubtotal * (1 - billDiscountPct / 100) * 100) / 100;
+              const effectivePricePerUnit = item.quantity > 0 ? Math.round(effectiveLineTotal / item.quantity * 100) / 100 : 0;
+              const isItemFree = item.price === 0 || effectiveLineTotal <= 0.001;
+              return (
+                <div key={item.itemId} className={`p-2.5 rounded-lg border space-y-2 ${isItemFree ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-100'}`}>
+                  {/* Row 1: Image + Name/SKU + Delete */}
                   <div className="flex items-center gap-2">
                     {item.imageUrl ? (
                       <img src={item.imageUrl} alt={item.name} className="w-9 h-9 object-cover rounded-lg shrink-0" />
                     ) : (
-                      <div className="w-9 h-9 bg-gray-200 rounded-lg flex items-center justify-center text-xs text-gray-400 shrink-0">
-                        {item.sku.slice(0, 3)}
-                      </div>
+                      <div className="w-9 h-9 bg-gray-200 rounded-lg flex items-center justify-center text-xs text-gray-400 shrink-0">{item.sku.slice(0, 3)}</div>
                     )}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate flex items-center gap-1.5">
                         {item.name}
                         {isItemFree && (
-                          <span className="inline-flex text-[10px] font-bold bg-green-500 text-white px-1.5 py-0.5 rounded-full shrink-0">
-                            Free Gift
-                          </span>
+                          <span className="inline-flex text-[10px] font-bold bg-green-500 text-white px-1.5 py-0.5 rounded-full shrink-0">Free Gift</span>
                         )}
                       </p>
                       <p className="text-[10px] text-gray-400 leading-tight truncate">{item.sku} / {item.barcode}</p>
                     </div>
-                    <button
-                      onClick={() => removeItem(item.itemId)}
-                      className="text-red-400 hover:text-red-600 shrink-0 p-1 -mr-1"
-                    >
+                    <button onClick={() => removeItem(item.itemId)} className="text-red-400 hover:text-red-600 shrink-0 p-1 -mr-1">
                       <Trash2 size={16} />
                     </button>
                   </div>
 
                   {/* Row 2: Qty | Price | Discount | Total */}
                   <div className="flex items-end gap-2">
-                    {/* Quantity controls */}
                     <div className="shrink-0">
                       <p className="text-[10px] text-gray-400 mb-1">จำนวน</p>
                       <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => updateQty(item.itemId, item.quantity - 1)}
-                          className="w-7 h-7 rounded bg-gray-200 flex items-center justify-center hover:bg-gray-300 active:bg-gray-400"
-                        >
+                        <button onClick={() => updateQty(item.itemId, item.quantity - 1)} className="w-7 h-7 rounded bg-gray-200 flex items-center justify-center hover:bg-gray-300 active:bg-gray-400">
                           <Minus size={12} />
                         </button>
                         <input
-                          type="text"
-                          inputMode="numeric"
-                          value={item.quantity}
-                          onChange={(e) => {
-                            const v = parseInt(e.target.value.replace(/\D/g, '')) || 1;
-                            updateQty(item.itemId, v);
-                          }}
+                          type="text" inputMode="numeric" value={item.quantity}
+                          onChange={(e) => { const v = parseInt(e.target.value.replace(/\D/g, '')) || 1; updateQty(item.itemId, v); }}
                           className="w-9 text-center text-sm border border-gray-300 rounded px-1 py-1"
                         />
-                        <button
-                          onClick={() => updateQty(item.itemId, item.quantity + 1)}
-                          className="w-7 h-7 rounded bg-gray-200 flex items-center justify-center hover:bg-gray-300 active:bg-gray-400"
-                        >
+                        <button onClick={() => updateQty(item.itemId, item.quantity + 1)} className="w-7 h-7 rounded bg-gray-200 flex items-center justify-center hover:bg-gray-300 active:bg-gray-400">
                           <Plus size={12} />
                         </button>
                       </div>
                     </div>
-
-                    {/* Price */}
                     <div className="flex-1 min-w-0">
                       <p className="text-[10px] text-gray-400 mb-1">ราคา (฿)</p>
                       <input
-                        type="text"
-                        inputMode="decimal"
-                        value={item.price}
-                        onKeyDown={numericKeyDown}
+                        type="text" inputMode="decimal" value={item.price} onKeyDown={numericKeyDown}
                         onChange={(e) => updatePrice(item.itemId, e.target.value)}
                         className="w-full text-right text-sm border border-gray-300 rounded px-2 py-1"
-                        title="ราคา"
                       />
                       {billDiscountPct > 0 && item.price > 0 && (
                         <p className="text-[10px] text-blue-600 text-right mt-0.5">ราคาสุทธิ/ชิ้น ฿{fmt(effectivePricePerUnit)}</p>
                       )}
                     </div>
-
-                    {/* Discount */}
                     <div className="flex-1 min-w-0">
                       <p className="text-[10px] text-gray-400 mb-1">ส่วนลด (฿)</p>
                       <input
-                        type="text"
-                        inputMode="decimal"
-                        value={item.discountStr}
-                        onKeyDown={numericKeyDown}
+                        type="text" inputMode="decimal" value={item.discountStr} onKeyDown={numericKeyDown}
                         onChange={(e) => updateDiscount(item.itemId, e.target.value)}
                         className="w-full text-right text-sm border border-orange-200 bg-orange-50 rounded px-2 py-1 text-orange-700"
                         placeholder="0"
                       />
                       {billDiscountPct > 0 && lineSubtotal > 0 && (
-                        <p className="text-[10px] text-purple-600 text-right mt-0.5">
-                          +฿{fmt(Math.round((lineSubtotal - effectiveLineTotal) * 100) / 100)} ({billDiscountPct}%)
-                        </p>
+                        <p className="text-[10px] text-purple-600 text-right mt-0.5">+฿{fmt(Math.round((lineSubtotal - effectiveLineTotal) * 100) / 100)} ({billDiscountPct}%)</p>
                       )}
                     </div>
-
-                    {/* Line total */}
                     <div className="shrink-0 text-right">
                       <p className="text-[10px] text-gray-400 mb-1">{billDiscountPct > 0 ? 'สุทธิ' : 'รวม'}</p>
                       {isItemFree ? (
@@ -1111,59 +692,237 @@ export default function POS() {
                     </div>
                   </div>
                 </div>
-                );
-              })}
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      </div>{/* end left column */}
+
+      {/* ===== Right column: Discount + Payment + Summary ===== */}
+      <div className="flex flex-col gap-4 w-full lg:w-1/2">
+
+      {/* ===== STEP 3: Discount ===== */}
+      <div className="card">
+        <h3 className="font-medium text-gray-700 mb-2">ส่วนลดบิล</h3>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">ส่วนลดบิล (%)</label>
+            <div className="relative">
+              <input
+                type="text" inputMode="numeric" value={billDiscountPctStr} maxLength={2}
+                onChange={(e) => { const v = e.target.value.replace(/\D/g, ''); const n = parseInt(v) || 0; setBillDiscountPctStr(n > 99 ? '99' : v); }}
+                className="input pr-8" placeholder="0"
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-semibold text-sm">%</span>
+            </div>
+            {billDiscountPct > 0 && <p className="text-xs text-orange-600 mt-0.5">= -฿{fmt(billDiscountAmt)}</p>}
+          </div>
+          <div>
+            <label className="label">หมายเหตุ</label>
+            <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} className="input" placeholder="หมายเหตุ (ถ้ามี)" />
+          </div>
+        </div>
+
+        {/* Totals */}
+        <div className="border-t pt-3 mt-3 space-y-1">
+          {(totalItemDiscounts > 0 || billDiscountAmt > 0) && (
+            <div className="flex justify-between text-sm text-gray-400">
+              <span>ยอดก่อนส่วนลด</span><span>฿{fmt(grossSubtotal)}</span>
             </div>
           )}
-
-          {/* Totals */}
-          <div className="border-t pt-3 mt-3 space-y-1">
-            {(totalItemDiscounts > 0 || billDiscountAmt > 0) && (
-              <div className="flex justify-between text-sm text-gray-400">
-                <span>ยอดก่อนส่วนลด</span>
-                <span>฿{fmt(grossSubtotal)}</span>
-              </div>
-            )}
-            {totalItemDiscounts > 0 && (
-              <div className="flex justify-between text-sm text-orange-500">
-                <span>ส่วนลดรายการ</span>
-                <span>-฿{fmt(totalItemDiscounts)}</span>
-              </div>
-            )}
-            <div className="flex justify-between text-lg font-bold text-gray-900 pt-1 border-t">
-              <span>
-                ยอดสุทธิ
-                {billDiscountPct > 0 && (
-                  <span className="ml-1 text-xs font-normal text-blue-600">(รวมส่วนลด {billDiscountPct}% ในราคาแล้ว)</span>
-                )}
-              </span>
-              <span>฿{fmt(total)}</span>
+          {totalItemDiscounts > 0 && (
+            <div className="flex justify-between text-sm text-orange-500">
+              <span>ส่วนลดรายการ</span><span>-฿{fmt(totalItemDiscounts)}</span>
             </div>
-          </div>
-
-          {/* Action buttons */}
-          <div className="flex gap-2 mt-4">
-            <button
-              onClick={saveBill}
-              disabled={saving || cartItems.length === 0}
-              className="btn-primary flex-1 py-2.5"
-            >
-              {saving ? 'กำลังบันทึก...' : editingBillId ? '💾 อัพเดทบิล' : '💾 บันทึกบิล'}
-            </button>
-            {editingBillId && (
-              <button onClick={clearCart} className="btn-secondary px-4 py-2.5" title="ยกเลิกการแก้ไข">
-                <X size={16} />
-              </button>
-            )}
-          </div>
-
-          {editingBillId && (
-            <p className="text-xs text-orange-600 text-center mt-1">
-              กำลังแก้ไขบิลที่มีอยู่ · กด X เพื่อยกเลิกและล้างตะกร้า
-            </p>
           )}
+          <div className="flex justify-between text-lg font-bold text-gray-900 pt-1 border-t">
+            <span>
+              ยอดสุทธิ
+              {billDiscountPct > 0 && (
+                <span className="ml-1 text-xs font-normal text-blue-600">(รวมส่วนลด {billDiscountPct}% ในราคาแล้ว)</span>
+              )}
+            </span>
+            <span>฿{fmt(total)}</span>
+          </div>
         </div>
       </div>
+
+      {/* ===== STEP 4: Payment + slip upload ===== */}
+      <div className="card">
+        <h3 className="font-medium text-gray-700 mb-3">การชำระเงิน</h3>
+
+        <div className="flex gap-2 mb-3">
+          <button
+            type="button" onClick={() => setPaymentMethod('CASH')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border-2 text-sm font-medium transition-colors ${paymentMethod === 'CASH' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}
+          >
+            <Banknote size={16} /> เงินสด
+          </button>
+          <button
+            type="button" onClick={() => setPaymentMethod('BANK_TRANSFER')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border-2 text-sm font-medium transition-colors ${paymentMethod === 'BANK_TRANSFER' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}
+          >
+            <CreditCard size={16} /> โอนเงิน
+          </button>
+        </div>
+
+        {/* Slip upload */}
+        <div className={`rounded-xl border-2 border-dashed transition-colors ${paymentMethod === 'BANK_TRANSFER' ? 'border-blue-300 bg-blue-50/40' : 'border-gray-200 bg-gray-50'}`}>
+          {slipPreview ? (
+            <div className="p-3">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium text-gray-500">{paymentMethod === 'BANK_TRANSFER' ? 'สลิปโอนเงิน' : 'สลิปแนบ (ไม่บังคับ)'}</p>
+                {paymentMethod === 'BANK_TRANSFER' && (
+                  <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium">✓ แนบสลิปแล้ว</span>
+                )}
+              </div>
+              <div className="relative group w-full">
+                <img src={slipPreview} alt="สลิปโอนเงิน" className="w-full max-h-48 object-contain rounded-lg bg-white border border-blue-100" />
+                <button type="button" onClick={removeSlip} className="absolute top-1.5 right-1.5 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow" title="ลบสลิป">
+                  <X size={12} />
+                </button>
+              </div>
+              <div className="flex gap-2 mt-2">
+                <button type="button" onClick={() => slipFileRef.current?.click()} className="flex-1 text-xs text-blue-600 border border-blue-300 rounded-lg py-1.5 hover:bg-blue-50 flex items-center justify-center gap-1">
+                  <Upload size={12} /> เปลี่ยนรูป
+                </button>
+                <button type="button" onClick={removeSlip} className="text-xs text-red-500 border border-red-200 rounded-lg px-3 py-1.5 hover:bg-red-50">ลบ</button>
+              </div>
+            </div>
+          ) : (
+            <div className="p-4">
+              <div className="flex flex-col items-center justify-center gap-2 mb-3">
+                <ImageIcon size={28} className={paymentMethod === 'BANK_TRANSFER' ? 'text-blue-300' : 'text-gray-300'} />
+                <p className={`text-xs font-medium ${paymentMethod === 'BANK_TRANSFER' ? 'text-blue-500' : 'text-gray-400'}`}>
+                  {paymentMethod === 'BANK_TRANSFER' ? (
+                    <span className="flex items-center gap-1">แนบสลิปการโอนเงิน <span className="bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">จำเป็น</span></span>
+                  ) : 'แนบสลิป (ไม่บังคับ)'}
+                </p>
+                <p className="text-[11px] text-gray-400">JPEG, PNG, WEBP — สูงสุด 10 MB</p>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => slipFileRef.current?.click()}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-colors ${paymentMethod === 'BANK_TRANSFER' ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}>
+                  <Upload size={15} /> อัพโหลด
+                </button>
+                <button type="button" onClick={() => slipCameraRef.current?.click()}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border-2 text-sm font-medium transition-colors ${paymentMethod === 'BANK_TRANSFER' ? 'bg-white border-blue-300 text-blue-600 hover:bg-blue-50' : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'}`}>
+                  <Camera size={15} /> ถ่ายรูป
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <input ref={slipFileRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleSlipFileSelected(e.target.files?.[0] ?? null)} />
+        <input ref={slipCameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleSlipFileSelected(e.target.files?.[0] ?? null)} />
+
+        {/* Save button */}
+        <div className="flex gap-2 mt-4">
+          <button onClick={saveBill} disabled={saving || cartItems.length === 0} className="btn-primary flex-1 py-3 text-base">
+            {saving ? 'กำลังบันทึก...' : editingBillId ? '💾 อัพเดทบิล' : '💾 บันทึกบิล'}
+          </button>
+          {editingBillId && (
+            <button onClick={clearCart} className="btn-secondary px-4 py-3" title="ยกเลิกการแก้ไข"><X size={16} /></button>
+          )}
+        </div>
+        {editingBillId && (
+          <p className="text-xs text-orange-600 text-center mt-1">กำลังแก้ไขบิลที่มีอยู่ · กด X เพื่อยกเลิกและล้างตะกร้า</p>
+        )}
+      </div>
+
+      {/* ===== STEP 5: Daily Summary (collapsible) ===== */}
+      <div className="card p-0 overflow-hidden">
+        <button
+          onClick={() => { setShowSummary(!showSummary); if (!showSummary) loadSummary(); }}
+          className="w-full px-4 py-3 flex items-center gap-2 hover:bg-gray-50 transition-colors text-left"
+        >
+          <BarChart3 size={16} className="text-blue-600 shrink-0" />
+          <span className="font-medium text-gray-700 text-sm">สรุปยอดขายวันนี้</span>
+          {summary && !loadingSummary && (
+            <span className="ml-auto text-xs text-gray-500 shrink-0">{summary.totalBills} บิล · ฿{fmt(summary.totalRevenue + summary.openRevenue)}</span>
+          )}
+          {loadingSummary && <RefreshCw size={13} className="ml-auto animate-spin text-gray-400" />}
+          <span className="text-gray-400 text-xs ml-1">{showSummary ? '▲' : '▼'}</span>
+        </button>
+
+        {showSummary && (
+          <div className="border-t px-4 pb-4 space-y-3">
+            <div className="flex items-center gap-3 pt-3">
+              <div className="grid grid-cols-3 gap-3 flex-1">
+                <div className="text-center bg-gray-50 rounded-lg py-2">
+                  <p className="text-xl font-bold text-gray-800">{summary?.totalBills ?? 0}</p>
+                  <p className="text-xs text-gray-500">บิลทั้งหมด</p>
+                </div>
+                <div className="text-center bg-orange-50 rounded-lg py-2">
+                  <p className="text-xl font-bold text-orange-600">{summary?.openBills ?? 0}</p>
+                  <p className="text-xs text-gray-500">บิลเปิด</p>
+                </div>
+                <div className="bg-blue-50 rounded-lg py-2 px-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-yellow-600">ยังไม่ปิด</span>
+                    <span className="text-xs font-semibold text-yellow-700">฿{fmt(summary?.openRevenue ?? 0)}</span>
+                  </div>
+                  <div className="border-t border-blue-100 mt-1 pt-1 flex items-center justify-between">
+                    <span className="text-[10px] text-gray-500">รายได้รวม</span>
+                    <span className="text-xs font-bold text-blue-700">฿{fmt((summary?.totalRevenue ?? 0) + (summary?.openRevenue ?? 0))}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button onClick={loadSummary} disabled={loadingSummary} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1 border border-gray-200 rounded px-2 py-1">
+                <RefreshCw size={13} className={loadingSummary ? 'animate-spin' : ''} /> รีเฟรช
+              </button>
+              <button onClick={closeDay} disabled={closingDay || !summary?.openBills} className="btn-danger text-xs flex items-center gap-1 py-1 px-3 ml-auto">
+                <Lock size={13} /> {closingDay ? 'กำลังปิดวัน...' : 'ปิดวัน'}
+              </button>
+            </div>
+
+            {openBills.length > 0 ? (
+              <div>
+                <p className="text-xs font-semibold text-gray-600 mb-2">บิลที่เปิดอยู่ (กดแก้ไขเพื่อโหลดเข้าตะกร้า)</p>
+                <div className="space-y-1.5 max-h-52 overflow-y-auto">
+                  {openBills.map((bill) => (
+                    <div key={bill.id} className="flex items-center justify-between bg-orange-50 border border-orange-100 rounded-lg px-3 py-2">
+                      <div>
+                        <p className="text-xs font-mono font-semibold text-gray-700">{bill.billNumber}</p>
+                        <p className="text-xs text-gray-500">{bill.items.length} รายการ · ฿{fmt(parseFloat(String(bill.total)))}</p>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button onClick={() => loadBillForEdit(bill)} className="text-xs bg-orange-100 text-orange-700 hover:bg-orange-200 rounded px-2.5 py-1 flex items-center gap-1 transition-colors">
+                          <Pencil size={12} /> แก้ไข
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (!confirm(`ยืนยันการยกเลิกบิล ${bill.billNumber}?\n\nการกระทำนี้ไม่สามารถย้อนกลับได้`)) return;
+                            client.put(`/bills/${bill.id}/cancel`).then(() => {
+                              if (editingBillId === bill.id) clearCart();
+                              loadSummary();
+                              toast.success(`ยกเลิกบิล ${bill.billNumber} เรียบร้อย`);
+                            }).catch(() => toast.error('ยกเลิกบิลไม่สำเร็จ'));
+                          }}
+                          className="text-xs bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded px-2 py-1 flex items-center gap-1 transition-colors"
+                          title="ยกเลิกบิล"
+                        >
+                          <X size={11} /> ยกเลิก
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : summary && (
+              <p className="text-xs text-gray-400 text-center py-2 bg-gray-50 rounded-lg">ไม่มีบิลที่เปิดอยู่ในวันนี้</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      </div>{/* end right column */}
     </div>
   );
 }

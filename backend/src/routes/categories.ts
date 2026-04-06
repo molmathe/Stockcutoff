@@ -37,6 +37,31 @@ router.post('/', authenticate, requireAdmin, async (req: AuthRequest, res: Respo
   }
 });
 
+router.post('/import', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { names } = req.body;
+    if (!Array.isArray(names) || names.length === 0) {
+      return res.status(400).json({ error: 'กรุณาระบุรายการหมวดหมู่' });
+    }
+    const trimmed = (names as string[]).map((n) => n.trim()).filter(Boolean);
+    const result = await prisma.category.createMany({
+      data: trimmed.map((name) => ({ name })),
+      skipDuplicates: true,
+    });
+    await logAudit({
+      userId: req.user!.id,
+      action: 'IMPORT_CATEGORIES',
+      entity: 'Category',
+      entityId: 'bulk',
+      ip: getClientIp(req),
+      detail: { created: result.count, total: trimmed.length },
+    });
+    res.json({ created: result.count, total: trimmed.length });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 router.put('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const { name } = req.body;
