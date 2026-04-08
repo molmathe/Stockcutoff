@@ -187,7 +187,7 @@ function DetailPanel({ log }: { log: AuditLog }) {
       <div className="grid grid-cols-2 gap-2 text-xs">
         {[
           { label: 'จำนวนบิล', value: `${d.count} บิล` },
-          { label: 'สาขา', value: d.branchId || '—' },
+          { label: 'สาขา', value: d.branchName || d.branchId || '—' },
         ].map((r) => (
           <div key={r.label} className="bg-green-50 rounded p-2">
             <p className="text-gray-400">{r.label}</p>

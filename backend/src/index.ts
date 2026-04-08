@@ -17,6 +17,7 @@ import blockedBarcodesRoutes from './routes/blockedBarcodes';
 import databaseRoutes from './routes/database';
 import calendarRoutes from './routes/calendar';
 import branchKpiRoutes from './routes/branchKpi';
+import notificationsRoutes from './routes/notifications';
 import prisma from './lib/prisma';
 // Removed reportTemplateRoutes
 
@@ -75,6 +76,7 @@ app.use('/api/blocked-barcodes', blockedBarcodesRoutes);
 app.use('/api/database', databaseRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/branch-kpi', branchKpiRoutes);
+app.use('/api/notifications', notificationsRoutes);
 // Removed /api/report-templates route
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));

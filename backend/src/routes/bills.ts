@@ -429,11 +429,18 @@ router.post('/submit-day', authenticate, async (req: AuthRequest, res: Response)
       where.branchId = branchId;
     }
 
+    // Resolve branch name for the audit log (non-blocking — failure doesn't affect the submit)
+    let branchName: string | undefined;
+    if (where.branchId) {
+      const branch = await prisma.branch.findUnique({ where: { id: where.branchId }, select: { name: true } });
+      branchName = branch?.name;
+    }
+
     const result = await prisma.bill.updateMany({
       where,
       data: { status: 'SUBMITTED', submittedAt: new Date() },
     });
-    logAudit({ userId: req.user!.id, action: 'SUBMIT_DAY', entity: 'Bill', detail: { count: result.count, branchId: where.branchId }, ip: getClientIp(req) });
+    logAudit({ userId: req.user!.id, action: 'SUBMIT_DAY', entity: 'Bill', detail: { count: result.count, branchId: where.branchId, branchName }, ip: getClientIp(req) });
     res.json({ message: `ส่งบิล ${result.count} รายการเรียบร้อย`, count: result.count });
   } catch {
     res.status(500).json({ error: 'Server error' });

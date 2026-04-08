@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import ExcelJS from 'exceljs';
 import prisma from '../lib/prisma';
-import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
+import { authenticate, requireAdmin, requireSuperAdmin, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
@@ -360,6 +360,170 @@ router.get('/export', authenticate, requireAdmin, async (req: AuthRequest, res) 
     res.end();
   } catch (err) {
     console.error('[calendar] export error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── Branch Deep Insight ─────────────────────────────────────────────────────
+// GET /api/calendar/branch-insight?date=YYYY-MM-DD&branchId=ID
+// Returns daily summary + top items + monthly KPI for one branch on one day.
+// Read-only — no writes, no changes to existing logic.
+router.get('/branch-insight', authenticate, requireSuperAdmin, async (req: AuthRequest, res) => {
+  try {
+    const dateStr  = req.query.date     as string;
+    const branchId = req.query.branchId as string;
+
+    if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      return res.status(400).json({ error: 'Invalid date. Use YYYY-MM-DD.' });
+    }
+    if (!branchId) {
+      return res.status(400).json({ error: 'branchId is required.' });
+    }
+
+    const { start: dayStart, end: dayEnd } = thaiDayBounds(dateStr);
+    const [year, month] = dateStr.split('-').map(Number);
+
+    // Month boundaries (Thai timezone)
+    const monthStart = new Date(`${year}-${String(month).padStart(2, '0')}-01T00:00:00+07:00`);
+    const monthEnd   = month === 12
+      ? new Date(`${year + 1}-01-01T00:00:00+07:00`)
+      : new Date(`${year}-${String(month + 1).padStart(2, '0')}-01T00:00:00+07:00`);
+
+    const THAI_OFFSET = 7 * 60 * 60 * 1000;
+
+    // Branch info
+    const branch = await prisma.branch.findUnique({
+      where: { id: branchId },
+      select: { id: true, name: true, code: true, active: true },
+    });
+    if (!branch) return res.status(404).json({ error: 'Branch not found.' });
+
+    // Submitted bills for this branch on this day
+    const dayBills = await prisma.bill.findMany({
+      where: {
+        branchId,
+        status: 'SUBMITTED',
+        OR: [
+          { saleDate: null, createdAt: { gte: dayStart, lte: dayEnd } },
+          { saleDate: { gte: dayStart, lte: dayEnd } },
+        ],
+      },
+      select: {
+        id: true,
+        total: true,
+        createdAt: true,
+        submittedAt: true,
+        items: {
+          select: {
+            quantity: true,
+            subtotal: true,
+            item: { select: { id: true, name: true, sku: true } },
+          },
+        },
+      },
+    });
+
+    // Daily summary
+    const dayTotal        = dayBills.reduce((s, b) => s + Number(b.total), 0);
+    const dayBillCount    = dayBills.length;
+    const dayAvgTxn       = dayBillCount > 0 ? Math.round((dayTotal / dayBillCount) * 100) / 100 : 0;
+    const dayItemsSold    = dayBills.reduce((s, b) => s + b.items.reduce((si, i) => si + i.quantity, 0), 0);
+
+    // Submission time window (Thai time)
+    const times = dayBills
+      .map(b => (b.submittedAt ?? b.createdAt).getTime())
+      .sort((a, b) => a - b);
+    const toThaiISO = (ms: number) => new Date(ms + THAI_OFFSET).toISOString();
+    const firstSubmission = times.length > 0 ? toThaiISO(times[0])               : null;
+    const lastSubmission  = times.length > 0 ? toThaiISO(times[times.length - 1]) : null;
+
+    // Top 5 items by revenue for this day
+    const itemMap = new Map<string, { id: string; name: string; sku: string; qty: number; revenue: number }>();
+    for (const bill of dayBills) {
+      for (const bi of bill.items) {
+        if (!bi.item) continue;
+        const { id, name, sku } = bi.item;
+        const existing = itemMap.get(id);
+        if (existing) {
+          existing.qty     += bi.quantity;
+          existing.revenue += Number(bi.subtotal);
+        } else {
+          itemMap.set(id, { id, name, sku: sku ?? '', qty: bi.quantity, revenue: Number(bi.subtotal) });
+        }
+      }
+    }
+    const topItems = Array.from(itemMap.values())
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 5);
+
+    // Monthly KPI — target vs actual
+    const [monthTarget, monthBillAgg, monthBillsForDays] = await Promise.all([
+      prisma.branchTarget.findUnique({
+        where: { branchId_year_month: { branchId, year, month } },
+      }),
+      prisma.bill.aggregate({
+        where: {
+          branchId,
+          status: 'SUBMITTED',
+          OR: [
+            { saleDate: null, createdAt: { gte: monthStart, lt: monthEnd } },
+            { saleDate: { gte: monthStart, lt: monthEnd } },
+          ],
+        },
+        _sum: { total: true },
+        _count: { id: true },
+      }),
+      prisma.bill.findMany({
+        where: {
+          branchId,
+          status: 'SUBMITTED',
+          OR: [
+            { saleDate: null, createdAt: { gte: monthStart, lt: monthEnd } },
+            { saleDate: { gte: monthStart, lt: monthEnd } },
+          ],
+        },
+        select: { createdAt: true, saleDate: true },
+      }),
+    ]);
+
+    // Count distinct submission days in the month
+    const submissionDaySet = new Set<string>();
+    for (const b of monthBillsForDays) {
+      const d = b.saleDate ?? b.createdAt;
+      submissionDaySet.add(new Date(d.getTime() + THAI_OFFSET).toISOString().split('T')[0]);
+    }
+
+    const monthActual      = Number(monthBillAgg._sum.total ?? 0);
+    const monthTargetAmt   = Number(monthTarget?.target ?? 0);
+    const monthAchievement = monthTargetAmt > 0
+      ? Math.round((monthActual / monthTargetAmt) * 1000) / 10   // one decimal
+      : null;
+    const daysInMonth      = new Date(year, month, 0).getDate();
+
+    res.json({
+      branch: { id: branch.id, name: branch.name, code: branch.code },
+      date: dateStr,
+      dailySummary: {
+        total:          dayTotal,
+        billCount:      dayBillCount,
+        avgTransaction: dayAvgTxn,
+        itemsSold:      dayItemsSold,
+        firstSubmission,
+        lastSubmission,
+      },
+      topItems,
+      monthlyKpi: {
+        year,
+        month,
+        target:         monthTargetAmt,
+        actual:         monthActual,
+        achievement:    monthAchievement,
+        submissionDays: submissionDaySet.size,
+        activeDays:     daysInMonth,
+      },
+    });
+  } catch (err) {
+    console.error('[calendar] branch-insight error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

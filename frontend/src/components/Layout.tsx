@@ -1,12 +1,153 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import pkg from '../../package.json';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
+import client from '../api/client';
 import {
   ShoppingCart, FileText, LayoutDashboard, Package,
   Building2, Users, BarChart3, LogOut, Menu, X, Tag,
-  FileSpreadsheet, FileUp, FileWarning, ClipboardList, GitMerge, ShieldBan, Database, CalendarDays
+  FileSpreadsheet, FileUp, FileWarning, ClipboardList, GitMerge, ShieldBan, Database, CalendarDays,
+  Bell, AlertTriangle,
 } from 'lucide-react';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface CriticalAlerts {
+  unclosedBillsYesterday: { count: number; branches: { id: string; name: string; code: string; count: number }[] };
+  pendingUnresolvedSales: { count: number };
+}
+
+// ─── Notification Bell ────────────────────────────────────────────────────────
+
+function NotificationBell() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const { data } = useQuery<CriticalAlerts>({
+    queryKey: ['notifications-critical'],
+    queryFn: () => client.get('/notifications/critical').then(r => r.data),
+    refetchInterval: 5 * 60 * 1000, // poll every 5 minutes
+    staleTime: 4 * 60 * 1000,
+  });
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const billCount       = data?.unclosedBillsYesterday.count ?? 0;
+  const unresolvedCount = data?.pendingUnresolvedSales.count ?? 0;
+  const totalAlerts     = billCount + unresolvedCount;
+  const hasAlerts       = totalAlerts > 0;
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className={`relative p-2 rounded-lg transition-colors ${
+          hasAlerts
+            ? 'text-amber-600 hover:bg-amber-50'
+            : 'text-gray-400 hover:bg-gray-100'
+        }`}
+        title="การแจ้งเตือน"
+      >
+        <Bell size={18} />
+        {hasAlerts && (
+          <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+            {totalAlerts > 99 ? '99+' : totalAlerts}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-2 w-80 bg-white border border-gray-200 rounded-xl shadow-lg z-50 overflow-hidden">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+            <span className="text-sm font-semibold text-gray-800">การแจ้งเตือนสำคัญ</span>
+            <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600">
+              <X size={16} />
+            </button>
+          </div>
+
+          {/* Alerts */}
+          <div className="divide-y divide-gray-50">
+            {/* Unclosed bills from yesterday */}
+            {billCount > 0 ? (
+              <div className="px-4 py-3">
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle size={16} className="text-amber-500 mt-0.5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-800">
+                      บิลค้างจากเมื่อวาน — {billCount} บิล
+                    </p>
+                    <ul className="mt-1 space-y-0.5">
+                      {data!.unclosedBillsYesterday.branches.map(b => (
+                        <li key={b.id} className="text-xs text-gray-500">
+                          {b.name} <span className="text-gray-400">[{b.code}]</span>
+                          {' '}{b.count} บิล
+                        </li>
+                      ))}
+                    </ul>
+                    <a
+                      href="/bills"
+                      onClick={() => setOpen(false)}
+                      className="mt-1.5 inline-block text-xs text-blue-600 hover:underline"
+                    >
+                      ดูรายการบิล →
+                    </a>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="px-4 py-3 flex items-center gap-2.5 text-sm text-gray-400">
+                <Bell size={15} />
+                บิลเมื่อวานปิดครบทุกรายการ
+              </div>
+            )}
+
+            {/* Pending unresolved sales */}
+            {unresolvedCount > 0 ? (
+              <div className="px-4 py-3">
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle size={16} className="text-orange-500 mt-0.5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-800">
+                      ยอดขายตกหล่นรอดำเนินการ — {unresolvedCount} รายการ
+                    </p>
+                    <a
+                      href="/admin/unresolved-sales"
+                      onClick={() => setOpen(false)}
+                      className="mt-1 inline-block text-xs text-blue-600 hover:underline"
+                    >
+                      ไปที่หน้าจัดการ →
+                    </a>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="px-4 py-3 flex items-center gap-2.5 text-sm text-gray-400">
+                <Bell size={15} />
+                ไม่มียอดขายตกหล่น
+              </div>
+            )}
+          </div>
+
+          {/* Footer note */}
+          {!hasAlerts && (
+            <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 text-center">
+              <p className="text-xs text-gray-400">ทุกอย่างเรียบร้อยดี</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Layout() {
   const { user, logout } = useAuth();
@@ -131,6 +272,7 @@ export default function Layout() {
               <span className="text-sm text-gray-500 hidden md:block">{user?.name} · {roleLabel()}</span>
             )}
           </div>
+          {user?.role === 'SUPER_ADMIN' && <NotificationBell />}
         </header>
         <main className="flex-1 overflow-y-auto p-4 md:p-6">
           <Outlet />
