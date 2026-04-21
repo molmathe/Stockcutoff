@@ -28,7 +28,9 @@ export function parseExcelDate(value: any): Date | null {
     const m = value.trim().match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
     if (m) {
       const year = parseInt(m[3]) < 100 ? 2000 + parseInt(m[3]) : parseInt(m[3]);
-      d = new Date(year, parseInt(m[2]) - 1, parseInt(m[1]));
+      const mm = String(parseInt(m[2])).padStart(2, '0');
+      const dd = String(parseInt(m[1])).padStart(2, '0');
+      d = new Date(`${year}-${mm}-${dd}T12:00:00+07:00`);
       if (!isNaN(d.getTime())) return d;
     }
   }

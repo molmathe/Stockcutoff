@@ -152,8 +152,8 @@ router.delete('/bulk', authenticate, requireAdmin, async (req: AuthRequest, res:
     if (inActiveBills) {
       return res.status(400).json({ error: 'ไม่สามารถลบสินค้าที่อยู่ในบิล OPEN หรือ SUBMITTED ได้' });
     }
-    await prisma.item.deleteMany({ where: { id: { in: ids } } });
-    res.json({ message: `ลบ ${ids.length} สินค้า` });
+    const result = await prisma.item.deleteMany({ where: { id: { in: ids } } });
+    res.json({ message: `ลบ ${result.count} สินค้า` });
   } catch {
     res.status(500).json({ error: 'Server error' });
   }
@@ -168,6 +168,9 @@ router.post('/bulk-import', authenticate, requireAdmin, async (req: AuthRequest,
     }
     let created = 0, updated = 0;
     const errors: string[] = [];
+
+    // Validate rows and collect valid ones
+    const validRows: { it: any; price: number }[] = [];
     for (const it of items) {
       if (!it.sku || !it.barcode || !it.name) {
         errors.push(`แถวไม่สมบูรณ์: ${JSON.stringify(it)}`);
@@ -178,14 +181,24 @@ router.post('/bulk-import', authenticate, requireAdmin, async (req: AuthRequest,
         errors.push(`SKU ${it.sku}: ราคาไม่ถูกต้อง`);
         continue;
       }
+      validRows.push({ it, price });
+    }
+
+    // Pre-fetch all existing barcodes in one query to avoid N+1
+    const validBarcodes = validRows.map(r => r.it.barcode);
+    const existingBarcodeSet = new Set(
+      (await prisma.item.findMany({ where: { barcode: { in: validBarcodes } }, select: { barcode: true } }))
+        .map(i => i.barcode)
+    );
+
+    for (const { it, price } of validRows) {
       try {
-        const existing = await prisma.item.findUnique({ where: { barcode: it.barcode } });
         await prisma.item.upsert({
           where: { barcode: it.barcode },
           update: { sku: it.sku, name: it.name, description: it.description || null, defaultPrice: price, category: it.category || null },
           create: { sku: it.sku, barcode: it.barcode, name: it.name, description: it.description || null, defaultPrice: price, category: it.category || null },
         });
-        if (existing) updated++; else created++;
+        if (existingBarcodeSet.has(it.barcode)) updated++; else created++;
       } catch (e: any) {
         errors.push(`Barcode ${it.barcode}: บาร์โค้ดซ้ำ ไม่สามารถนำเข้าได้`);
       }
@@ -205,9 +218,14 @@ router.post('/bulk-images', authenticate, requireAdmin, upload.array('images', 5
     const matched: { barcode: string; name: string; imageUrl: string }[] = [];
     const unmatched: string[] = [];
 
+    // Pre-fetch all matching items in one query to avoid N+1
+    const fileBarcodes = files.map(f => path.basename(f.originalname, path.extname(f.originalname)).trim());
+    const foundItems = await prisma.item.findMany({ where: { barcode: { in: fileBarcodes } } });
+    const itemByBarcode = new Map(foundItems.map(i => [i.barcode, i]));
+
     for (const file of files) {
       const barcode = path.basename(file.originalname, path.extname(file.originalname)).trim();
-      const item = await prisma.item.findUnique({ where: { barcode } });
+      const item = itemByBarcode.get(barcode);
 
       if (item) {
         if (item.imageUrl) {

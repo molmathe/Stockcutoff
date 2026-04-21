@@ -98,13 +98,13 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
     if (status) where.status = status;
 
     if (startDate || endDate) {
-      where.createdAt = {};
-      if (startDate) where.createdAt.gte = new Date(startDate as string);
-      if (endDate) {
-        const end = new Date(endDate as string);
-        end.setHours(23, 59, 59, 999);
-        where.createdAt.lte = end;
-      }
+      const dateFilter: any = {};
+      if (startDate) dateFilter.gte = new Date(`${startDate}T00:00:00+07:00`);
+      if (endDate) dateFilter.lte = new Date(`${endDate}T23:59:59.999+07:00`);
+      where.OR = [
+        { saleDate: null, createdAt: dateFilter },
+        { saleDate: dateFilter },
+      ];
     }
 
     const [bills, totalCount] = await Promise.all([

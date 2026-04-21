@@ -37,12 +37,8 @@ const buildWhere = (req: AuthRequest, query: any) => {
 
   if (startDate || endDate) {
     const dateFilter: any = {};
-    if (startDate) dateFilter.gte = new Date(startDate as string);
-    if (endDate) {
-      const e = new Date(endDate as string);
-      e.setHours(23, 59, 59, 999);
-      dateFilter.lte = e;
-    }
+    if (startDate) dateFilter.gte = new Date(`${startDate}T00:00:00+07:00`);
+    if (endDate) dateFilter.lte = new Date(`${endDate}T23:59:59.999+07:00`);
     // For POS bills filter by createdAt; for IMPORT bills filter by saleDate
     where['OR'] = [
       { saleDate: null, createdAt: dateFilter },
@@ -136,6 +132,7 @@ async function remapImportRows(inputRows: any[], maxRows = 10000) {
     const rowNet = r.price * r.qty - rowDiscount;
 
     const errors: string[] = [];
+    const hasDataError = !r.saleDate || r.qty <= 0 || r.price < 0 || rowNet < 0;
     if (!r.saleDate) errors.push('วันที่ไม่ถูกต้อง');
     if (r.qty <= 0) errors.push('จำนวนต้องมากว่า 0');
     if (r.price < 0) errors.push('ราคาไม่ถูกต้อง');
@@ -143,7 +140,7 @@ async function remapImportRows(inputRows: any[], maxRows = 10000) {
     if (!branch && r.rawBranch) errors.push(`ไม่พบสาขา: ${r.rawBranch}`);
     if (!item && r.rawItem) errors.push(`ไม่พบสินค้า: ${r.rawItem}`);
 
-    const isMatched = !!(r.saleDate && branch && item && r.qty > 0 && r.price >= 0 && rowNet >= 0 && errors.length === 0);
+    const isMatched = !!(r.saleDate && branch && item && r.qty > 0 && r.price >= 0 && rowNet >= 0);
 
     if (isMatched) {
       matched++;
@@ -166,7 +163,7 @@ async function remapImportRows(inputRows: any[], maxRows = 10000) {
       qty: r.qty,
       price: r.price,
       discount: rowDiscount,
-      status: isMatched ? 'matched' : errors.length ? 'invalid' : (!branch ? 'no_branch' : 'no_item'),
+      status: isMatched ? 'matched' : hasDataError ? 'invalid' : !branch ? 'no_branch' : 'no_item',
       errors,
     });
   }
@@ -520,7 +517,7 @@ router.get('/export-bigseller', authenticate, requireAdmin, async (req: AuthRequ
 router.get("/import/drafts", authenticate, requireSuperAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const drafts = await prisma.importDraft.findMany({
-      where: { userId: req.user!.id },
+      where: { userId: req.user!.id, platform: { not: { startsWith: 'RECONCILE_' } } },
       orderBy: { updatedAt: 'desc' }
     });
     const summary = drafts.map(d => ({
@@ -538,8 +535,8 @@ router.post('/import/draft', authenticate, requireSuperAdmin, async (req: AuthRe
     let draftId = req.body.draftId;
 
     if (draftId) {
-      await prisma.importDraft.update({
-        where: { id: draftId },
+      await prisma.importDraft.updateMany({
+        where: { id: draftId, userId: req.user!.id },
         data: { rowsData: rows, updatedAt: new Date() }
       });
     } else {
@@ -575,7 +572,7 @@ router.post('/import/draft/:id/resume', authenticate, requireSuperAdmin, async (
 
 router.delete('/import/draft/:id', authenticate, requireSuperAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    await prisma.importDraft.delete({ where: { id: req.params.id } });
+    await prisma.importDraft.deleteMany({ where: { id: req.params.id, userId: req.user!.id } });
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: 'Server error' });
@@ -676,8 +673,7 @@ router.post('/unresolved-sales/resolve', authenticate, requireAdmin, async (req:
       if (!branch || !item) continue;
 
       const dateStr = record.saleDate || new Date().toISOString().split('T')[0];
-      const parsedDate = new Date(dateStr);
-      parsedDate.setUTCHours(0,0,0,0);
+      const parsedDate = new Date(`${dateStr}T12:00:00+07:00`);
 
       const billNumber = generateImportBillNumber(parsedDate);
       const totalString = (record.qty * Number(record.price)).toFixed(2);
@@ -706,11 +702,6 @@ router.post('/unresolved-sales/resolve', authenticate, requireAdmin, async (req:
             }
           }
         }
-      });
-
-      await prisma.item.update({
-        where: { id: item.id },
-        data: { saleDate: parsedDate },
       });
 
       await prisma.unresolvedSale.update({
@@ -776,20 +767,23 @@ router.post('/import/submit', authenticate, requireSuperAdmin, async (req: AuthR
 
     // ── Duplicate detection (unless force=true) ───────────────────────────────
     if (!force && rows && rows.length > 0) {
-      const saleDates = [...new Set(rows.map(r => r.saleDate))]; // e.g. ["2026-01-15"]
-      const branchIds = [...new Set(rows.map(r => r.branchId).filter(Boolean))];
-      // Use day-range OR clauses to avoid exact-timestamp mismatch
-      const dateRanges = saleDates.map(d => ({
-        gte: new Date(`${d}T00:00:00+07:00`),
-        lte: new Date(`${d}T23:59:59.999+07:00`),
-      }));
+      // Check exact (branchId, saleDate) pairs — avoid cross-product false positives
+      const uniquePairs = [...new Set(rows.map(r => `${r.saleDate}|${r.branchId}`))].map(k => {
+        const [d, branchId] = k.split('|');
+        return { d, branchId };
+      });
       const existingBills = await prisma.bill.findMany({
         where: {
           source: 'IMPORT',
           importPlatform: platform || null,
-          branchId: { in: branchIds },
           status: 'SUBMITTED',
-          OR: dateRanges.map(r => ({ saleDate: r })),
+          OR: uniquePairs.map(({ d, branchId }) => ({
+            branchId,
+            saleDate: {
+              gte: new Date(`${d}T00:00:00+07:00`),
+              lte: new Date(`${d}T23:59:59.999+07:00`),
+            },
+          })),
         },
         select: { saleDate: true, branchId: true, branch: { select: { name: true } } },
       });
@@ -827,7 +821,7 @@ router.post('/import/submit', authenticate, requireSuperAdmin, async (req: AuthR
     for (const row of rows) {
       const key = `${row.saleDate}|${row.branchId}`;
       if (!groups.has(key)) {
-        groups.set(key, { saleDate: new Date(row.saleDate), branchId: row.branchId, items: [] });
+        groups.set(key, { saleDate: new Date(`${row.saleDate}T12:00:00+07:00`), branchId: row.branchId, items: [] });
       }
       groups.get(key)!.items.push(row);
     }

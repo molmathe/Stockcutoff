@@ -12,13 +12,12 @@ router.get('/', authenticate, requireAdmin, async (req: AuthRequest, res) => {
 
     if (month < 1 || month > 12) return res.status(400).json({ error: 'Invalid month' });
 
-    // Thai UTC+7 start/end of month
+    // Thai UTC+7 start/end of month — use explicit timezone to avoid server-tz dependency
     const THAI_OFFSET = 7 * 60 * 60 * 1000;
-    const startLocal = new Date(year, month - 1, 1);           // local midnight 1st
-    const endLocal   = new Date(year, month,     1);           // local midnight 1st of next month
-    // Convert to UTC-stored values: subtract 7h so filtering by createdAt works correctly
-    const startUTC = new Date(startLocal.getTime() - THAI_OFFSET);
-    const endUTC   = new Date(endLocal.getTime()   - THAI_OFFSET);
+    const mm = String(month).padStart(2, '0');
+    const nextMM = month === 12 ? `${year + 1}-01` : `${year}-${String(month + 1).padStart(2, '0')}`;
+    const startUTC = new Date(`${year}-${mm}-01T00:00:00+07:00`);
+    const endUTC   = new Date(`${nextMM}-01T00:00:00+07:00`);
 
     // Active business days in the month (all days 1..last)
     const daysInMonth = new Date(year, month, 0).getDate();

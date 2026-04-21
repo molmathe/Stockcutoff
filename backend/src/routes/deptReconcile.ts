@@ -17,10 +17,11 @@ const toThaiDateStr = (d: Date): string => {
   return thai.toISOString().split('T')[0];
 };
 
-const generateBillNumber = () => {
-  const d = new Date();
-  const date = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-  return `B${date}-${uuidv4().split('-')[0].toUpperCase()}`;
+const generateBillNumber = (saleDateStr?: string) => {
+  const ref = saleDateStr ? new Date(`${saleDateStr}T12:00:00+07:00`) : new Date();
+  const thai = new Date(ref.getTime() + 7 * 60 * 60 * 1000);
+  const ymd = thai.toISOString().slice(0, 10).replace(/-/g, '');
+  return `B${ymd}-${uuidv4().split('-')[0].toUpperCase()}`;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -331,19 +332,23 @@ router.post('/submit', authenticate, requireSuperAdmin, async (req: AuthRequest,
 
     // ── Duplicate detection (unless force=true) ───────────────────────────────
     if (!force) {
-      const saleDates = [...new Set(deptStoreSales.map((r: any) => r.date as string))];
-      const branchIds = [...new Set(deptStoreSales.map((r: any) => r.branchId as string).filter(Boolean))];
-      const dateRanges = saleDates.map(d => ({
-        gte: new Date(`${d}T00:00:00+07:00`),
-        lte: new Date(`${d}T23:59:59.999+07:00`),
-      }));
+      // Check exact (branchId, saleDate) pairs — avoid cross-product false positives
+      const uniquePairs = [...new Set(deptStoreSales.map((r: any) => `${r.date}|${r.branchId}`))].map(k => {
+        const [d, branchId] = k.split('|');
+        return { d, branchId };
+      });
       const existingBills = await prisma.bill.findMany({
         where: {
           source: 'IMPORT',
           importPlatform: platform || null,
-          branchId: { in: branchIds },
           status: 'SUBMITTED',
-          OR: dateRanges.map(r => ({ saleDate: r })),
+          OR: uniquePairs.map(({ d, branchId }) => ({
+            branchId,
+            saleDate: {
+              gte: new Date(`${d}T00:00:00+07:00`),
+              lte: new Date(`${d}T23:59:59.999+07:00`),
+            },
+          })),
         },
         select: { saleDate: true, branchId: true, branch: { select: { name: true } } },
       });
@@ -378,7 +383,7 @@ router.post('/submit', authenticate, requireSuperAdmin, async (req: AuthRequest,
 
         await tx.bill.create({
           data: {
-            billNumber: generateBillNumber(),
+            billNumber: generateBillNumber(date),
             branchId,
             userId: req.user!.id,
             status: 'SUBMITTED',
@@ -651,8 +656,8 @@ router.post('/draft', authenticate, requireSuperAdmin, async (req: AuthRequest, 
 
     let id = draftId;
     if (id) {
-      await prisma.importDraft.update({
-        where: { id },
+      await prisma.importDraft.updateMany({
+        where: { id, userId: req.user!.id },
         data: { fileName, rowsData: previewData as any, updatedAt: new Date() },
       });
     } else {
@@ -687,7 +692,7 @@ router.post('/draft/:id/resume', authenticate, requireSuperAdmin, async (req: Au
 // DELETE /dept-reconcile/draft/:id
 router.delete('/draft/:id', authenticate, requireSuperAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    await prisma.importDraft.delete({ where: { id: req.params.id } });
+    await prisma.importDraft.deleteMany({ where: { id: req.params.id, userId: req.user!.id } });
     res.json({ success: true });
   } catch {
     res.status(500).json({ error: 'Failed to delete draft' });
