@@ -13,8 +13,18 @@ export interface ParsedRow {
   discount: number; // Total row discount amount (across all units in this row)
 }
 
-/** Parse a cell value from ExcelJS into a JS Date */
-export function parseExcelDate(value: any): Date | null {
+/** Build a Date anchored to 12:00 Bangkok time so later toISOString-based date strings are stable across server TZs */
+function bkkNoon(y: number, m: number, d: number): Date {
+  return new Date(`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T12:00:00+07:00`);
+}
+
+/**
+ * Parse a cell value from ExcelJS into a JS Date.
+ * `dayFirst` toggles DD.MM.YYYY (Thai/European) vs the JS default.
+ * Playhouse exports text dates in DD.MM.YYYY — set true for that platform so
+ * "02.04.2026" parses as 2 April, not the US Feb 4 that `new Date()` gives.
+ */
+export function parseExcelDate(value: any, dayFirst = false): Date | null {
   if (!value) return null;
   if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
   if (typeof value === 'number') {
@@ -23,19 +33,29 @@ export function parseExcelDate(value: any): Date | null {
     return isNaN(d.getTime()) ? null : d;
   }
   if (typeof value === 'string' && value.trim()) {
-    let d = new Date(value.trim());
-    if (!isNaN(d.getTime())) return d;
-    const m = value.trim().match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
-    if (m) {
+    const s = value.trim();
+    const m = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+    if (dayFirst && m) {
       const year = parseInt(m[3]) < 100 ? 2000 + parseInt(m[3]) : parseInt(m[3]);
-      const mm = String(parseInt(m[2])).padStart(2, '0');
-      const dd = String(parseInt(m[1])).padStart(2, '0');
-      d = new Date(`${year}-${mm}-${dd}T12:00:00+07:00`);
+      const d = bkkNoon(year, parseInt(m[2]), parseInt(m[1]));
       if (!isNaN(d.getTime())) return d;
+    }
+    // JS Date parser for ISO ("2026-04-02") and US MM.DD.YYYY inputs, re-anchored
+    // to +07:00 so downstream toISOString().slice(0,10) is stable across TZs.
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) {
+      return bkkNoon(d.getFullYear(), d.getMonth() + 1, d.getDate());
+    }
+    // Final fallback: if JS Date couldn't parse (e.g. "31.12.2026"), try the
+    // DD.MM.YYYY interpretation even when dayFirst=false, preserving prior behavior.
+    if (!dayFirst && m) {
+      const year = parseInt(m[3]) < 100 ? 2000 + parseInt(m[3]) : parseInt(m[3]);
+      const d2 = bkkNoon(year, parseInt(m[2]), parseInt(m[1]));
+      if (!isNaN(d2.getTime())) return d2;
     }
   }
   if (value && typeof value === 'object' && value.richText) {
-    return parseExcelDate(value.richText.map((r: any) => r.text).join(''));
+    return parseExcelDate(value.richText.map((r: any) => r.text).join(''), dayFirst);
   }
   return null;
 }
@@ -72,6 +92,16 @@ export async function parseExcelData(buffer: Buffer, platform: ImportPlatform): 
   ws.getRow(headerRowIdx).eachCell({ includeEmpty: true }, (cell, colNum) => {
     headers[colNum - 1] = cellStr(cell.value);
   });
+
+  // Playhouse "Account Report" uses a 2-row header where row 1 holds the outer
+  // group labels (Brand / Date / Branch / ...) and row 2 holds sub-labels only
+  // under the grouped columns (Sales Quantity / Gross Sales / ...). Fall back
+  // to row 1 for any column whose row 2 cell is empty so Date + Branch resolve.
+  if (platform === 'PLAYHOUSE' && headerRowIdx > 1) {
+    ws.getRow(headerRowIdx - 1).eachCell({ includeEmpty: true }, (cell, colNum) => {
+      if (!headers[colNum - 1]) headers[colNum - 1] = cellStr(cell.value);
+    });
+  }
 
   // Expected column matching depending on platform
   let dateCol = -1, branchCol = -1, itemCol = -1, qtyCol = -1, totalCol = -1, discountCol = -1;
@@ -122,7 +152,7 @@ export async function parseExcelData(buffer: Buffer, platform: ImportPlatform): 
     // Skip empty summary lines (must have at least date, branch, or item)
     if (!rawBranch && !rawItem && !rawDateVal) return;
 
-    const saleDate = parseExcelDate(rawDateVal);
+    const saleDate = parseExcelDate(rawDateVal, platform === 'PLAYHOUSE');
     const qty = parseFloat(cellStr(rawQtyVal)) || 0;
     const totalAmount = parseFloat(cellStr(rawTotalVal)) || 0;  // Gross total for this row
     const discountAmount = Math.max(0, parseFloat(cellStr(rawDiscountVal)) || 0); // Row-level discount
