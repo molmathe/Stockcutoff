@@ -117,6 +117,29 @@ router.delete('/:id', authenticate, requireSuperAdmin, async (req: AuthRequest, 
     const target = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!target) return res.status(404).json({ error: 'ไม่พบผู้ใช้' });
     if (target.isSystem) return res.status(400).json({ error: 'ไม่สามารถลบ system user ได้' });
+
+    // A user with bills/drafts/unresolved sales is referenced by required FKs,
+    // so a hard delete would fail. Deactivate instead to preserve those records.
+    const [bills, drafts, sales] = await Promise.all([
+      prisma.bill.count({ where: { userId: target.id } }),
+      prisma.importDraft.count({ where: { userId: target.id } }),
+      prisma.unresolvedSale.count({ where: { userId: target.id } }),
+    ]);
+    const hasRecords = bills > 0 || drafts > 0 || sales > 0;
+
+    if (hasRecords) {
+      await prisma.user.update({ where: { id: target.id }, data: { active: false } });
+      await logAudit({
+        userId: req.user!.id,
+        action: 'DEACTIVATE_USER',
+        entity: 'User',
+        entityId: target.id,
+        ip: getClientIp(req),
+        detail: { username: target.username, name: target.name, role: target.role, bills, drafts, sales }
+      });
+      return res.json({ message: 'Deactivated', deactivated: true });
+    }
+
     await prisma.user.delete({ where: { id: req.params.id } });
 
     // Audit log
@@ -130,7 +153,10 @@ router.delete('/:id', authenticate, requireSuperAdmin, async (req: AuthRequest, 
     });
 
     res.json({ message: 'Deleted' });
-  } catch {
+  } catch (err: any) {
+    if (err.code === 'P2003') {
+      return res.status(400).json({ error: 'ไม่สามารถลบผู้ใช้ที่มีข้อมูลอ้างอิงอยู่ได้' });
+    }
     res.status(500).json({ error: 'Server error' });
   }
 });

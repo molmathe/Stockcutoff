@@ -47,8 +47,11 @@ export default function Users() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => client.delete(`/users/${id}`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); toast.success('ลบเรียบร้อย'); },
+    mutationFn: (id: string) => client.delete(`/users/${id}`).then((r) => r.data),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+      toast.success(data?.deactivated ? 'ปิดการใช้งานผู้ใช้แล้ว (มีประวัติการใช้งาน)' : 'ลบเรียบร้อย');
+    },
     onError: (err: any) => toast.error(err.response?.data?.error || 'ลบไม่สำเร็จ'),
   });
 
