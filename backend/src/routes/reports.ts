@@ -93,6 +93,15 @@ function generateImportBillNumber(date: Date): string {
   return `IMP${d}-${uuidv4().split('-')[0].toUpperCase().slice(0, 5)}`;
 }
 
+// createMany builds one parameterised INSERT; Postgres caps a statement at
+// 65535 bind params, so split large batches to stay well clear of it.
+const CHUNK_SIZE = 1000;
+function chunk<T>(arr: T[]): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += CHUNK_SIZE) out.push(arr.slice(i, i + CHUNK_SIZE));
+  return out;
+}
+
 async function remapImportRows(inputRows: any[], maxRows = 10000) {
   const allBranches = await prisma.branch.findMany({ where: { active: true, deletedAt: null } });
   const allItems = await prisma.item.findMany({ where: { active: true } });
@@ -827,8 +836,17 @@ router.post('/import/submit', authenticate, requireSuperAdmin, async (req: AuthR
     }
 
     const round2 = (n: number) => Math.round(n * 100) / 100;
-    let createdCount = 0;
     const now = new Date();
+
+    // Build every row before opening the transaction so it issues a bounded
+    // number of queries. Previously each bill was created with its own awaited
+    // call outside any transaction, so a failure part-way through left the
+    // already-created bills committed with no way to roll them back.
+    const billRows: any[] = [];
+    const billItemRows: any[] = [];
+    // An item touched by several groups keeps the last group's date, matching the
+    // previous per-group update order.
+    const itemSaleDate = new Map<string, Date>();
 
     for (const [, group] of groups) {
       // Compute per-item net subtotals (gross - item discount)
@@ -852,59 +870,78 @@ router.post('/import/submit', authenticate, requireSuperAdmin, async (req: AuthR
         console.log(`[IMPORT] Discount applied: gross=฿${billGross}, discount=฿${billDiscount}, net=฿${billNet} (branch=${group.branchId}, date=${group.saleDate})`);
       }
 
-      await prisma.bill.create({
-        data: {
-          billNumber: generateImportBillNumber(group.saleDate),
-          branchId: group.branchId,
-          userId: req.user!.id,
-          status: 'SUBMITTED',
-          source: 'IMPORT',
-          importPlatform: platform || null,
-          saleDate: group.saleDate,
-          subtotal: billNet,   // Net (after discounts) — consistent with how POS bills store subtotal
-          discount: 0,         // No bill-level discount for imports
-          total: billNet,
-          submittedAt: now,
-          notes: fileName ? `นำเข้าจากไฟล์: ${fileName}` : 'นำเข้าจากไฟล์ Excel',
-          items: {
-            create: billItems,
-          },
-        },
+      const billId = uuidv4();
+      billRows.push({
+        id: billId,
+        billNumber: generateImportBillNumber(group.saleDate),
+        branchId: group.branchId,
+        userId: req.user!.id,
+        status: 'SUBMITTED',
+        source: 'IMPORT',
+        importPlatform: platform || null,
+        saleDate: group.saleDate,
+        subtotal: billNet,   // Net (after discounts) — consistent with how POS bills store subtotal
+        discount: 0,         // No bill-level discount for imports
+        total: billNet,
+        submittedAt: now,
+        notes: fileName ? `นำเข้าจากไฟล์: ${fileName}` : 'นำเข้าจากไฟล์ Excel',
       });
 
-      await Promise.all(
-        group.items.map((r) =>
-          prisma.item.update({
-            where: { id: r.itemId },
-            data: { saleDate: group.saleDate },
-          })
-        )
-      );
-
-      createdCount++;
+      for (const bi of billItems) {
+        billItemRows.push({ billId, ...bi });
+      }
+      for (const r of group.items) {
+        itemSaleDate.set(r.itemId, group.saleDate);
+      }
     }
 
-    if (unmatchedRows && unmatchedRows.length > 0) {
-      await prisma.unresolvedSale.createMany({
-        data: unmatchedRows.map((r: any) => ({
-          userId: req.user!.id,
-          platform: String(platform),
-          fileName: fileName || 'Unknown File',
-          saleDate: r.saleDate?.toString() || null,
-          rawDate: r.rawDate?.toString() || null,
-          rawBranch: r.rawBranch?.toString() || null,
-          rawItem: r.rawItem?.toString() || null,
-          qty: Number(r.qty) || 0,
-          price: Number(r.price) || 0,
-          errors: r.errors || [],
-          status: 'PENDING'
-        }))
-      });
+    const createdCount = billRows.length;
+
+    // One item update per distinct sale date rather than one per row.
+    const itemsByDate = new Map<number, string[]>();
+    for (const [itemId, saleDate] of itemSaleDate) {
+      const key = saleDate.getTime();
+      if (!itemsByDate.has(key)) itemsByDate.set(key, []);
+      itemsByDate.get(key)!.push(itemId);
     }
 
-    // Auto-delete draft after successful submit
+    const unresolvedRows = (unmatchedRows ?? []).map((r: any) => ({
+      userId: req.user!.id,
+      platform: String(platform),
+      fileName: fileName || 'Unknown File',
+      saleDate: r.saleDate?.toString() || null,
+      rawDate: r.rawDate?.toString() || null,
+      rawBranch: r.rawBranch?.toString() || null,
+      rawItem: r.rawItem?.toString() || null,
+      qty: Number(r.qty) || 0,
+      price: Number(r.price) || 0,
+      errors: r.errors || [],
+      status: 'PENDING'
+    }));
+
+    // All or nothing: a half-written import leaves duplicate-detection blocking
+    // the retry while the missing rows stay missing.
+    await prisma.$transaction(async (tx) => {
+      for (const part of chunk(billRows)) {
+        await tx.bill.createMany({ data: part });
+      }
+      for (const part of chunk(billItemRows)) {
+        await tx.billItem.createMany({ data: part });
+      }
+      for (const [time, itemIds] of itemsByDate) {
+        for (const part of chunk(itemIds)) {
+          await tx.item.updateMany({ where: { id: { in: part } }, data: { saleDate: new Date(time) } });
+        }
+      }
+      for (const part of chunk(unresolvedRows)) {
+        await tx.unresolvedSale.createMany({ data: part });
+      }
+    }, { timeout: 30_000, maxWait: 10_000 });
+
+    // Auto-delete draft after successful submit. The import is already committed,
+    // so a cleanup failure must not report the import itself as failed.
     if (draftId) {
-      await prisma.importDraft.deleteMany({ where: { id: draftId } });
+      await prisma.importDraft.deleteMany({ where: { id: draftId } }).catch(() => {});
     }
 
     res.json({
