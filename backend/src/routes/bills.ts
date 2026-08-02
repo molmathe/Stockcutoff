@@ -214,11 +214,14 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
       return { itemId: it.itemId, quantity: qty, price, discount: itemDiscount, sub };
     });
 
-    const totalDiscountPct = Math.min(99, Math.max(0, round2(Number(discountPct))));
-    // Global discount: prefer discountPct (percentage-based); fall back to fixed amount
+    const totalDiscountPct = Math.min(99, Math.max(0, round2(Number(discountPct) || 0)));
+    // Global discount: prefer discountPct (percentage-based); fall back to fixed amount.
+    // The fixed amount is clamped to subtotal — otherwise it is distributed pro-rata
+    // below and drives every BillItem.subtotal negative while Bill.total clamps to 0,
+    // leaving the stored line items and Bill.discount inconsistent with each other.
     const globalDiscountAmt = totalDiscountPct > 0
       ? round2(subtotal * totalDiscountPct / 100)
-      : Math.max(0, round2(Number(discount)));
+      : Math.min(Math.max(0, round2(Number(discount) || 0)), subtotal);
     const totalDiscount = globalDiscountAmt;
 
     // Pro-rata distribution of global discount across line items
@@ -309,10 +312,11 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
       subtotal = round2(subtotal + sub);
       return { itemId: it.itemId, quantity: qty, price, discount: itemDiscount, sub };
     });
-    const totalDiscountPct = Math.min(99, Math.max(0, round2(Number(discountPct))));
+    const totalDiscountPct = Math.min(99, Math.max(0, round2(Number(discountPct) || 0)));
+    // Clamped to subtotal, and NaN-guarded, for the same reasons as POST / above.
     const globalDiscountAmt = totalDiscountPct > 0
       ? round2(subtotal * totalDiscountPct / 100)
-      : Math.max(0, round2(Number(discount)));
+      : Math.min(Math.max(0, round2(Number(discount) || 0)), subtotal);
     const totalDiscount = globalDiscountAmt;
 
     // Pro-rata distribution of global discount across line items
