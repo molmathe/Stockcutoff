@@ -137,6 +137,20 @@ router.get('/today-summary', authenticate, async (req: AuthRequest, res: Respons
       createdAt: { gte: today, lt: tomorrow },
     };
 
+    // Only SUPER_ADMIN may look at a branch other than their own. The query
+    // parameter used to override req.user.branchId outright, which let a
+    // BRANCH_ADMIN read any branch's takings. GET / (above) already scopes this
+    // way. Reject rather than quietly substituting the caller's own branch — the
+    // POS branch picker is shown to every non-cashier, so silently returning
+    // different figures than the selected branch would be worse than an error.
+    if (
+      req.user!.role !== 'SUPER_ADMIN' &&
+      branchId &&
+      branchId !== req.user!.branchId
+    ) {
+      return res.status(403).json({ error: 'ไม่มีสิทธิ์ดูข้อมูลสาขาอื่น' });
+    }
+
     const effectiveBranchId = (branchId as string) || req.user!.branchId;
     if (effectiveBranchId) where.branchId = effectiveBranchId;
     if (req.user!.role === 'CASHIER') where.userId = req.user!.id;
