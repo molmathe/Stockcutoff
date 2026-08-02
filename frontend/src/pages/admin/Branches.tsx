@@ -121,8 +121,8 @@ export default function Branches() {
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    if (form.pincode && !/^\d{4}$/.test(form.pincode)) {
-      toast.error('รหัส PIN ต้องเป็นตัวเลข 4 หลักเท่านั้น');
+    if (form.pincode && !/^\d{4,8}$/.test(form.pincode)) {
+      toast.error('รหัส PIN ต้องเป็นตัวเลข 4-8 หลัก');
       return;
     }
     const payload: any = {
@@ -444,16 +444,16 @@ export default function Branches() {
             <div>
               <label className="label flex items-center gap-1.5">
                 <KeyRound size={14} className="text-blue-500" />
-                รหัส PIN สำหรับ POS (4 หลัก)
+                รหัส PIN สำหรับ POS (4-8 หลัก)
               </label>
               <input
                 type="text"
                 inputMode="numeric"
-                maxLength={4}
+                maxLength={8}
                 value={form.pincode}
-                onChange={(e) => setForm((f) => ({ ...f, pincode: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
+                onChange={(e) => setForm((f) => ({ ...f, pincode: e.target.value.replace(/\D/g, '').slice(0, 8) }))}
                 className="input text-sm"
-                placeholder="เช่น 1234 (เว้นว่างเพื่อล้าง PIN)"
+                placeholder="ยิ่งยาวยิ่งปลอดภัย (เว้นว่างเพื่อล้าง PIN)"
               />
               <p className="text-xs text-gray-400 mt-1">ใช้สำหรับเข้าสู่ระบบ POS ด้วย PIN โดยไม่ต้องใช้รหัสผ่าน</p>
             </div>

@@ -7,6 +7,13 @@ import { logAudit, getClientIp } from '../lib/audit';
 import { parseBranchExcel } from '../lib/branchParser';
 
 const router = Router();
+
+// 4 digits is only a 10,000-value keyspace, which a distributed attacker can still
+// walk despite the login rate limit. Longer PINs are accepted so branches can be
+// strengthened individually; existing 4-digit PINs keep working.
+const PINCODE_PATTERN = /^\d{4,8}$/;
+const PINCODE_ERROR = 'PIN ต้องเป็นตัวเลข 4-8 หลัก';
+
 const EXCEL_MIME = [
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/vnd.ms-excel',
@@ -106,8 +113,8 @@ router.post('/', authenticate, requireAdmin, async (req: AuthRequest, res: Respo
     if (Array.isArray(tags)) data.tags = tags.map((t: string) => t.trim()).filter(Boolean);
 
     if (pincode && String(pincode).trim()) {
-      if (!/^\d{4}$/.test(String(pincode).trim())) {
-        return res.status(400).json({ error: 'PIN ต้องเป็นตัวเลข 4 หลัก' });
+      if (!PINCODE_PATTERN.test(String(pincode).trim())) {
+        return res.status(400).json({ error: PINCODE_ERROR });
       }
       data.pincode = String(pincode).trim();
     }
@@ -146,10 +153,10 @@ router.put('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Res
     if (pincode !== undefined) {
       if (pincode === '' || pincode === null) {
         data.pincode = null;
-      } else if (/^\d{4}$/.test(String(pincode).trim())) {
+      } else if (PINCODE_PATTERN.test(String(pincode).trim())) {
         data.pincode = String(pincode).trim();
       } else {
-        return res.status(400).json({ error: 'PIN ต้องเป็นตัวเลข 4 หลัก' });
+        return res.status(400).json({ error: PINCODE_ERROR });
       }
     }
 

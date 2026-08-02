@@ -6,6 +6,11 @@ import { Hash, Delete, ShoppingCart, Building2, CheckCircle, XCircle, AlertTrian
 import client from '../api/client';
 import type { Bill } from '../types';
 
+// Branches may use a longer PIN than the original fixed 4 digits; existing
+// 4-digit PINs still work, so the entry pad accepts any length in this range.
+const PIN_MIN = 4;
+const PIN_MAX = 8;
+
 export default function POSLogin() {
   const { user, posLoginPreview, posLoginCommit } = useAuth();
   const navigate = useNavigate();
@@ -24,14 +29,14 @@ export default function POSLogin() {
   if (user && !showOpenBillsAlert) return <Navigate to="/" replace />;
 
   const handleKeyPress = (digit: string) => {
-    if (pin.length < 4) setPin((p) => p + digit);
+    if (pin.length < PIN_MAX) setPin((p) => p + digit);
   };
 
   const handleDelete = () => setPin((p) => p.slice(0, -1));
   const handleClear = () => setPin('');
 
   const handleLogin = async () => {
-    if (pin.length < 4) { toast.error('กรุณากรอกรหัส PIN 4 หลัก'); return; }
+    if (pin.length < PIN_MIN) { toast.error(`กรุณากรอกรหัส PIN อย่างน้อย ${PIN_MIN} หลัก`); return; }
     setLoading(true);
     try {
       const result = await posLoginPreview(pin);
@@ -76,12 +81,12 @@ export default function POSLogin() {
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value.replace(/\D/g, '').slice(0, 4);
+    const val = e.target.value.replace(/\D/g, '').slice(0, PIN_MAX);
     setPin(val);
   };
 
   const handleInputKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && pin.length === 4) handleLogin();
+    if (e.key === 'Enter' && pin.length >= PIN_MIN) handleLogin();
   };
 
   const formatDate = (dateStr: string) => {
@@ -103,12 +108,12 @@ export default function POSLogin() {
             <Hash className="text-white" size={28} />
           </div>
           <h1 className="text-xl font-bold text-gray-900">เข้าสู่ระบบ POS</h1>
-          <p className="text-gray-500 text-sm mt-1">กรอกรหัส PIN 4 หลัก</p>
+          <p className="text-gray-500 text-sm mt-1">กรอกรหัส PIN</p>
         </div>
 
         {/* PIN Display */}
         <div className="flex justify-center gap-3 mb-6">
-          {Array.from({ length: 4 }).map((_, i) => (
+          {Array.from({ length: Math.max(PIN_MIN, pin.length) }).map((_, i) => (
             <div
               key={i}
               className={`w-10 h-10 rounded-lg border-2 flex items-center justify-center text-lg font-bold transition-all ${
@@ -131,7 +136,7 @@ export default function POSLogin() {
           onChange={handleInputChange}
           onKeyDown={handleInputKeyDown}
           className="sr-only"
-          maxLength={4}
+          maxLength={PIN_MAX}
         />
 
         {/* Numpad */}
@@ -159,7 +164,7 @@ export default function POSLogin() {
 
         <button
           onClick={handleLogin}
-          disabled={loading || pin.length < 4}
+          disabled={loading || pin.length < PIN_MIN}
           className="btn-primary w-full py-3 text-base font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <span className="flex items-center justify-center gap-2">

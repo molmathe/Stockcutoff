@@ -43,13 +43,43 @@ const PORT = process.env.PORT || 3001;
 // Trust nginx reverse proxy (required for express-rate-limit behind nginx)
 app.set('trust proxy', 1);
 
+// ── Client identification ────────────────────────────────────────────────────
+// req.ip is useless for rate limiting here: the request path is
+// Cloudflare → cloudflared → nginx → backend, so with `trust proxy` set to 1 it
+// resolves to the tunnel container's constant address and every client in the
+// world shares a single bucket (verified against production).
+//
+// Cloudflare sets CF-Connecting-IP to the true client address and overwrites any
+// value the client supplies, so it is the one header that can be trusted. X-Forwarded-For
+// cannot: its left-most entry is attacker-controlled.
+const clientKey = (req: express.Request): string => {
+  const cf = req.headers['cf-connecting-ip'];
+  if (typeof cf === 'string' && cf.trim()) return cf.trim();
+  return req.ip ?? 'unknown';
+};
+
 // ── Rate limiters ────────────────────────────────────────────────────────────
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 300,
+  keyGenerator: clientKey,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Request rate limit exceeded' },
+});
+
+// Credential endpoints need their own budget: the POS PIN is only four digits,
+// so the 300/min API allowance alone would let one client walk the entire
+// keyspace in about half an hour. Successful logins are not counted, so normal
+// staff use never consumes it — only failures do.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  keyGenerator: clientKey,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'พยายามเข้าสู่ระบบผิดหลายครั้งเกินไป กรุณารอ 15 นาทีแล้วลองใหม่' },
 });
 
 // ── Middleware ───────────────────────────────────────────────────────────────
@@ -62,6 +92,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // ── Routes ───────────────────────────────────────────────────────────────────
 app.use('/api', apiLimiter);
+app.use('/api/auth', authLimiter);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/items', itemRoutes);

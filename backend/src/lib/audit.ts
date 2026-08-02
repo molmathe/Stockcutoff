@@ -28,8 +28,11 @@ export const logAudit = async (params: AuditParams) => {
   }
 };
 
+// Cloudflare overwrites CF-Connecting-IP with the real client address, so it is
+// the only header here a caller cannot forge. The left-most X-Forwarded-For entry
+// is caller-supplied — reading it let anyone write a chosen IP into the audit log.
 export const getClientIp = (req: Request): string => {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (forwarded) return (Array.isArray(forwarded) ? forwarded[0] : forwarded).split(',')[0].trim();
+  const cf = req.headers['cf-connecting-ip'];
+  if (typeof cf === 'string' && cf.trim()) return cf.trim();
   return req.socket?.remoteAddress || '';
 };
