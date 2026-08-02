@@ -90,6 +90,20 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
+// Idle-connection timeout, kept under the 40s proxy_read_timeout in
+// nginx/nginx.conf so a stalled request returns our JSON error rather than a bare
+// gateway timeout. This must be registered before the routes: middleware runs in
+// registration order, and it previously sat below them, so any matched route
+// answered and returned without it ever executing.
+app.use((_req, res, next) => {
+  res.setTimeout(30000, () => {
+    // Streaming responses (e.g. the database export) may already have sent
+    // headers — setting a status at that point throws.
+    if (!res.headersSent) res.status(503).json({ error: 'Request timeout' });
+  });
+  next();
+});
+
 // ── Routes ───────────────────────────────────────────────────────────────────
 app.use('/api', apiLimiter);
 app.use('/api/auth', authLimiter);
@@ -121,12 +135,6 @@ const cleanAuditLogs = async () => {
 };
 cleanAuditLogs().catch(console.error);
 setInterval(() => cleanAuditLogs().catch(console.error), 24 * 60 * 60 * 1000);
-
-// Request timeout middleware (30s)
-app.use((_req, res, next) => {
-  res.setTimeout(30000, () => res.status(503).json({ error: 'Request timeout' }));
-  next();
-});
 
 const server = app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
 
