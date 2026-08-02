@@ -197,6 +197,12 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
     if (!targetBranch) {
       return res.status(400).json({ error: 'กรุณาระบุสาขา' });
     }
+    // branchId arrives in the request body and was used unchecked, so any signed-in
+    // user could book sales against a branch that is not theirs. PUT /:id
+    // (bills.ts:273) and POST /:id/submit (bills.ts:391) both gate on this already.
+    if (req.user!.role !== 'SUPER_ADMIN' && targetBranch !== req.user!.branchId) {
+      return res.status(403).json({ error: 'ไม่มีสิทธิ์สร้างบิลของสาขาอื่น' });
+    }
 
     let subtotal = 0;
     const rawItems = (items as any[]).map((it, idx) => {
