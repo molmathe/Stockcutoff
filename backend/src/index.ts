@@ -52,11 +52,19 @@ app.set('trust proxy', 1);
 // Cloudflare sets CF-Connecting-IP to the true client address and overwrites any
 // value the client supplies, so it is the one header that can be trusted. X-Forwarded-For
 // cannot: its left-most entry is attacker-controlled.
-const clientKey = (req: express.Request): string => {
+let warnedNoClientIp = false;
+const clientIpOrNull = (req: express.Request): string | null => {
   const cf = req.headers['cf-connecting-ip'];
   if (typeof cf === 'string' && cf.trim()) return cf.trim();
-  return req.ip ?? 'unknown';
+  if (!warnedNoClientIp) {
+    warnedNoClientIp = true;
+    console.warn('[rate-limit] CF-Connecting-IP absent — per-client login limiting is disabled');
+  }
+  return null;
 };
+
+// Falls back to the shared bucket, which is what this limiter already was.
+const clientKey = (req: express.Request): string => clientIpOrNull(req) ?? req.ip ?? 'unknown';
 
 // ── Rate limiters ────────────────────────────────────────────────────────────
 const apiLimiter = rateLimit({
@@ -72,10 +80,17 @@ const apiLimiter = rateLimit({
 // so the 300/min API allowance alone would let one client walk the entire
 // keyspace in about half an hour. Successful logins are not counted, so normal
 // staff use never consumes it — only failures do.
+//
+// If the client cannot be identified this limiter disables itself rather than
+// falling back to the shared bucket: 10 failures is a per-client budget, and
+// applied globally it would lock every branch out of the POS the moment staff
+// somewhere mistyped a PIN ten times. Degrading to the previous behaviour is the
+// safe direction; apiLimiter still caps total traffic.
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
   keyGenerator: clientKey,
+  skip: (req) => clientIpOrNull(req) === null,
   skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
