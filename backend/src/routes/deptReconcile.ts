@@ -12,6 +12,15 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+// createMany builds one parameterised INSERT; Postgres caps a statement at
+// 65535 bind params, so split large batches to stay well clear of it.
+const CHUNK_SIZE = 1000;
+const chunk = <T>(arr: T[]): T[][] => {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += CHUNK_SIZE) out.push(arr.slice(i, i + CHUNK_SIZE));
+  return out;
+};
+
 const toThaiDateStr = (d: Date): string => {
   const thai = new Date(d.getTime() + 7 * 60 * 60 * 1000);
   return thai.toISOString().split('T')[0];
@@ -374,68 +383,83 @@ router.post('/submit', authenticate, requireSuperAdmin, async (req: AuthRequest,
       billGroups.get(key)!.push(row);
     }
 
-    let importedBills = 0;
+    // Build every row up front so the transaction issues a bounded number of
+    // queries instead of one round-trip per bill — a per-bill loop blew the
+    // 5s interactive-transaction timeout on large dept reports.
+    const billRows: any[] = [];
+    const billItemRows: any[] = [];
+
+    for (const [, rows] of billGroups) {
+      const { date, branchId } = rows[0];
+      const subtotal = round2(rows.reduce((s: number, r: any) => s + r.storeAmount, 0));
+      const billId = uuidv4();
+
+      billRows.push({
+        id: billId,
+        billNumber: generateBillNumber(date),
+        branchId,
+        userId: req.user!.id,
+        status: 'SUBMITTED',
+        source: 'IMPORT',
+        importPlatform: platform || null,
+        saleDate: new Date(`${date}T12:00:00+07:00`),
+        submittedAt: new Date(),
+        subtotal,
+        discount: 0,
+        total: subtotal,
+        notes: `Dept reconcile · ${fileName || platform}`,
+      });
+
+      for (const r of rows) {
+        billItemRows.push({
+          billId,
+          itemId: r.itemId,
+          quantity: r.storeQty,
+          price: r.unitPrice || 0,
+          discount: 0,
+          subtotal: r.storeAmount,
+        });
+      }
+    }
+
+    const importedBills = billRows.length;
 
     await prisma.$transaction(async (tx) => {
-      for (const [, rows] of billGroups) {
-        const { date, branchId } = rows[0];
-        const subtotal = round2(rows.reduce((s: number, r: any) => s + r.storeAmount, 0));
-
-        await tx.bill.create({
-          data: {
-            billNumber: generateBillNumber(date),
-            branchId,
-            userId: req.user!.id,
-            status: 'SUBMITTED',
-            source: 'IMPORT',
-            importPlatform: platform || null,
-            saleDate: new Date(`${date}T12:00:00+07:00`),
-            submittedAt: new Date(),
-            subtotal,
-            discount: 0,
-            total: subtotal,
-            notes: `Dept reconcile · ${fileName || platform}`,
-            items: {
-              create: rows.map((r: any) => ({
-                itemId: r.itemId,
-                quantity: r.storeQty,
-                price: r.unitPrice || 0,
-                discount: 0,
-                subtotal: r.storeAmount,
-              })),
-            },
-          },
-        });
-        importedBills++;
+      for (const part of chunk(billRows)) {
+        await tx.bill.createMany({ data: part });
+      }
+      for (const part of chunk(billItemRows)) {
+        await tx.billItem.createMany({ data: part });
       }
 
       // Push review_needed into UnresolvedSales
       if (Array.isArray(reviewNeeded) && reviewNeeded.length > 0) {
-        await tx.unresolvedSale.createMany({
-          data: reviewNeeded.map((r: any) => ({
-            userId: req.user!.id,
-            platform: platform || 'UNKNOWN',
-            fileName: fileName || 'dept-reconcile',
-            saleDate: r.date,
-            rawDate: r.date,
-            rawBranch: r.branchCode || r.branchName || '',
-            rawItem: r.itemBarcode || r.itemSku || '',
-            qty: Math.abs(r.storeQty) || r.consolidatedQty || 0,
-            price: Math.abs(r.storeAmount) || r.consolidatedAmount || 0,
-            status: 'PENDING',
-            errors: {
-              issue: r.issue,
-              consolidatedQty: r.consolidatedQty,
-              consolidatedAmount: r.consolidatedAmount,
-              boothQty: r.boothQty,
-              boothAmount: r.boothAmount,
-              storeQty: r.storeQty,
-              storeAmount: r.storeAmount,
-            },
-          })),
-        });
+        const unresolvedRows = reviewNeeded.map((r: any) => ({
+          userId: req.user!.id,
+          platform: platform || 'UNKNOWN',
+          fileName: fileName || 'dept-reconcile',
+          saleDate: r.date,
+          rawDate: r.date,
+          rawBranch: r.branchCode || r.branchName || '',
+          rawItem: r.itemBarcode || r.itemSku || '',
+          qty: Math.abs(r.storeQty) || r.consolidatedQty || 0,
+          price: Math.abs(r.storeAmount) || r.consolidatedAmount || 0,
+          status: 'PENDING',
+          errors: {
+            issue: r.issue,
+            consolidatedQty: r.consolidatedQty,
+            consolidatedAmount: r.consolidatedAmount,
+            boothQty: r.boothQty,
+            boothAmount: r.boothAmount,
+            storeQty: r.storeQty,
+            storeAmount: r.storeAmount,
+          },
+        }));
+        for (const part of chunk(unresolvedRows)) {
+          await tx.unresolvedSale.createMany({ data: part });
+        }
       }
-    });
+    }, { timeout: 30_000, maxWait: 10_000 });
 
     logAudit({
       userId: req.user!.id,
@@ -457,7 +481,8 @@ router.post('/submit', authenticate, requireSuperAdmin, async (req: AuthRequest,
     });
   } catch (err: any) {
     console.error('[deptReconcile submit]', err);
-    res.status(500).json({ error: err.message || 'Server error' });
+    // Keep Prisma internals (file paths, line numbers, SQL) out of the response.
+    res.status(500).json({ error: 'นำเข้าข้อมูลไม่สำเร็จ กรุณาลองใหม่ หรือแบ่งไฟล์ให้เล็กลง' });
   }
 });
 
