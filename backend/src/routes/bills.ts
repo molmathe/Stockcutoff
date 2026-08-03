@@ -32,6 +32,10 @@ const router = Router();
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+// Matches the cap on GET / below. The summary figures are aggregated in the
+// database, so this bounds only the bill list the response carries.
+const SUMMARY_BILL_LIMIT = 500;
+
 /**
  * Distributes a global discount amount pro-rata across line items.
  * Each item receives: (itemSubtotal / totalSubtotal) * globalDiscountAmt
@@ -155,30 +159,46 @@ router.get('/today-summary', authenticate, async (req: AuthRequest, res: Respons
     if (effectiveBranchId) where.branchId = effectiveBranchId;
     if (req.user!.role === 'CASHIER') where.userId = req.user!.id;
 
-    const bills = await prisma.bill.findMany({
-      where,
-      include: {
-        items: { include: { item: { select: { id: true, name: true, sku: true, barcode: true, imageUrl: true } } } },
-        branch: { select: { name: true, code: true } },
-        user: { select: { name: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    // The figures come from the database rather than from the returned array, so
+    // capping the array cannot make them wrong. Reducing over an unbounded
+    // findMany was the previous shape: adding a `take` to it would have made a
+    // busy branch under-report its own takings, which is worse than the memory
+    // use it would have fixed.
+    const [byStatus, itemTotals, bills] = await Promise.all([
+      prisma.bill.groupBy({
+        by: ['status'],
+        where,
+        _count: { _all: true },
+        _sum: { total: true },
+      }),
+      prisma.billItem.aggregate({
+        where: { bill: { ...where, status: 'SUBMITTED' } },
+        _sum: { quantity: true },
+      }),
+      prisma.bill.findMany({
+        where,
+        include: {
+          items: { include: { item: { select: { id: true, name: true, sku: true, barcode: true, imageUrl: true } } } },
+          branch: { select: { name: true, code: true } },
+          user: { select: { name: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: SUMMARY_BILL_LIMIT,
+      }),
+    ]);
 
-    const openBills = bills.filter((b) => b.status === 'OPEN');
-    const submittedBills = bills.filter((b) => b.status === 'SUBMITTED');
-    const totalRevenue = submittedBills.reduce((s, b) => s + Number(b.total), 0);
-    const openRevenue = openBills.reduce((s, b) => s + Number(b.total), 0);
-    const totalItems = submittedBills.reduce((s, b) => s + b.items.reduce((si, i) => si + i.quantity, 0), 0);
+    const statusRow = (s: string) => byStatus.find((g) => g.status === s);
+    const totalBills = byStatus.reduce((n, g) => n + g._count._all, 0);
 
     res.json({
-      totalBills: bills.length,
-      openBills: openBills.length,
-      submittedBills: submittedBills.length,
-      totalRevenue,
-      openRevenue,
-      totalItems,
+      totalBills,
+      openBills: statusRow('OPEN')?._count._all ?? 0,
+      submittedBills: statusRow('SUBMITTED')?._count._all ?? 0,
+      totalRevenue: Number(statusRow('SUBMITTED')?._sum.total ?? 0),
+      openRevenue: Number(statusRow('OPEN')?._sum.total ?? 0),
+      totalItems: itemTotals._sum.quantity ?? 0,
       bills,
+      truncated: totalBills > SUMMARY_BILL_LIMIT,
     });
   } catch {
     res.status(500).json({ error: 'Server error' });

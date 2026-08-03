@@ -62,7 +62,11 @@ router.post('/pos-login', async (req: Request, res: Response) => {
     const posUsername = `pos_${branch.code.toLowerCase()}`;
     const posUser = await prisma.user.upsert({
       where: { username: posUsername },
-      update: { branchId: branch.id, active: true },
+      // Deliberately not setting active here: it used to be forced back to true on
+      // every PIN entry, so disabling a branch's POS account was undone by the next
+      // login. authenticate() now rejects inactive accounts per request, so leaving
+      // it would have produced a login that succeeds and then 401s on everything.
+      update: { branchId: branch.id },
       create: {
         username: posUsername,
         password: await bcrypt.hash(posUsername, 10), // password unused; PIN is the auth mechanism
@@ -73,6 +77,11 @@ router.post('/pos-login', async (req: Request, res: Response) => {
         active: true,
       },
     });
+
+    if (!posUser.active) {
+      await logAudit({ userId: posUser.id, action: 'POS_LOGIN_FAILED', entity: 'Branch', entityId: branch.id, ip: getClientIp(req) });
+      return res.status(401).json({ error: 'บัญชี POS ของสาขานี้ถูกปิดใช้งาน' });
+    }
 
     const token = jwt.sign(
       { id: posUser.id, role: 'CASHIER', branchId: branch.id, posMode: true },
