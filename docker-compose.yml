@@ -98,6 +98,9 @@ services:
         condition: service_started
     networks:
       - app_net
+      # checkin.fonneygroup.com arrives through this stack's tunnel but is served
+      # by the separate timesheet container, which lives on proxy_network.
+      - proxy_network
     deploy:
       resources:
         limits:
@@ -179,6 +182,9 @@ services:
 networks:
   app_net:
     driver: bridge
+  # Created by the timesheet stack (molmathe/fonneygroup-timesheet).
+  proxy_network:
+    external: true
 
 volumes:
   postgres_data:
