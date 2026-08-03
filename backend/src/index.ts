@@ -19,6 +19,7 @@ import calendarRoutes from './routes/calendar';
 import branchKpiRoutes from './routes/branchKpi';
 import notificationsRoutes from './routes/notifications';
 import prisma from './lib/prisma';
+import { clientIp } from './lib/clientIp';
 // Removed reportTemplateRoutes
 
 dotenv.config();
@@ -40,31 +41,20 @@ if (!process.env.FRONTEND_URL) {
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Trust nginx reverse proxy (required for express-rate-limit behind nginx)
-app.set('trust proxy', 1);
+// Two proxies sit in front of this service: the cloudflared tunnel container and
+// nginx. At 1 this resolved req.ip to the tunnel's own address, so every caller in
+// the world shared one rate-limit bucket — confirmed against production by watching
+// RateLimit-Remaining fall for requests made from unrelated source IPs.
+//
+// Counting from the right is what makes the result unspoofable: Cloudflare appends
+// the true client address to X-Forwarded-For, so extra entries a caller injects sit
+// further left and never land on this position.
+app.set('trust proxy', 2);
 
 // ── Client identification ────────────────────────────────────────────────────
-// req.ip is useless for rate limiting here: the request path is
-// Cloudflare → cloudflared → nginx → backend, so with `trust proxy` set to 1 it
-// resolves to the tunnel container's constant address and every client in the
-// world shares a single bucket (verified against production).
-//
-// Cloudflare sets CF-Connecting-IP to the true client address and overwrites any
-// value the client supplies, so it is the one header that can be trusted. X-Forwarded-For
-// cannot: its left-most entry is attacker-controlled.
-let warnedNoClientIp = false;
-const clientIpOrNull = (req: express.Request): string | null => {
-  const cf = req.headers['cf-connecting-ip'];
-  if (typeof cf === 'string' && cf.trim()) return cf.trim();
-  if (!warnedNoClientIp) {
-    warnedNoClientIp = true;
-    console.warn('[rate-limit] CF-Connecting-IP absent — per-client login limiting is disabled');
-  }
-  return null;
-};
-
-// Falls back to the shared bucket, which is what this limiter already was.
-const clientKey = (req: express.Request): string => clientIpOrNull(req) ?? req.ip ?? 'unknown';
+// See lib/clientIp.ts. Falls back to a shared key, which is what this limiter
+// already was before per-client keying existed.
+const clientKey = (req: express.Request): string => clientIp(req) ?? 'shared';
 
 // ── Rate limiters ────────────────────────────────────────────────────────────
 const apiLimiter = rateLimit({
@@ -90,7 +80,7 @@ const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
   keyGenerator: clientKey,
-  skip: (req) => clientIpOrNull(req) === null,
+  skip: (req) => clientIp(req) === null,
   skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
