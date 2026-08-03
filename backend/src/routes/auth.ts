@@ -7,6 +7,10 @@ import { logAudit, getClientIp } from '../lib/audit';
 
 const router = Router();
 
+// Fixed-cost bcrypt hash compared against when a username is not found, so login
+// response time stays constant and does not reveal whether a username exists.
+const DUMMY_PASSWORD_HASH = '$2a$10$OAkMsdDRvWtofGZeY9qUo.FSdAowZ6y0avkqPqhGSfqvTReWjomUm';
+
 // Standard admin/cashier login (username + password)
 router.post('/login', async (req: Request, res: Response) => {
   try {
@@ -16,7 +20,10 @@ router.post('/login', async (req: Request, res: Response) => {
     }
     const user = await prisma.user.findUnique({ where: { username }, include: { branch: true } });
 
-    if (!user || !user.active || !(await bcrypt.compare(password, user.password))) {
+    // Always run bcrypt.compare (against a dummy hash when the user is missing) to keep
+    // response time constant and prevent username enumeration via timing.
+    const passwordValid = await bcrypt.compare(password, user?.password ?? DUMMY_PASSWORD_HASH);
+    if (!user || !user.active || !passwordValid) {
       await logAudit({ userId: undefined, action: 'LOGIN_FAILED', entity: 'User', detail: { username }, ip: getClientIp(req) });
       return res.status(401).json({ error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
     }
@@ -47,7 +54,7 @@ router.post('/pos-login', async (req: Request, res: Response) => {
 
     const branch = await prisma.branch.findUnique({ where: { pincode: String(pincode) } });
     if (!branch || !branch.active || branch.deletedAt) {
-      await logAudit({ userId: undefined, action: 'POS_LOGIN_FAILED', entity: 'Branch', detail: { pincode }, ip: getClientIp(req) });
+      await logAudit({ userId: undefined, action: 'POS_LOGIN_FAILED', entity: 'Branch', ip: getClientIp(req) });
       return res.status(401).json({ error: 'รหัส PIN ไม่ถูกต้อง' });
     }
 

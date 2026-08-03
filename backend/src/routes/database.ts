@@ -79,7 +79,7 @@ router.get('/export', authenticate, requireSuperAdmin, async (req: AuthRequest, 
     fs.rmSync(tmpDir, { recursive: true, force: true });
     console.error('Export error:', err);
     if (!res.headersSent) {
-      res.status(500).json({ error: 'Export failed', details: err.message });
+      res.status(500).json({ error: 'Export failed' });
     }
   }
 });
@@ -111,7 +111,25 @@ router.post('/import', authenticate, requireSuperAdmin, upload.single('file'), a
   try {
     fs.mkdirSync(extractDir, { recursive: true });
 
-    // Step 1: extract the tar.gz archive
+    // Step 1a: validate archive entries before extracting. busybox tar (alpine image)
+    // has no --no-absolute-names guard, so reject any member with an absolute or
+    // ../ traversal path that could write outside extractDir.
+    await new Promise<void>((resolve, reject) => {
+      const list = spawn('tar', ['-tzf', filePath]);
+      let names = '';
+      let listErr = '';
+      list.stdout.on('data', (d) => { names += d.toString(); });
+      list.stderr.on('data', (d) => { listErr += d.toString(); });
+      list.on('close', (code) => {
+        if (code !== 0) return reject(new Error(`tar list exited with code ${code}: ${listErr}`));
+        const unsafe = names.split('\n').map((s) => s.trim()).filter(Boolean)
+          .find((n) => n.startsWith('/') || n.split('/').includes('..'));
+        if (unsafe) return reject(new Error(`Unsafe path in archive: ${unsafe}`));
+        resolve();
+      });
+    });
+
+    // Step 1b: extract the tar.gz archive
     await new Promise<void>((resolve, reject) => {
       const tar = spawn('tar', ['-xzf', filePath, '-C', extractDir]);
       tar.stderr.on('data', (d) => console.error(`tar extract stderr: ${d}`));
@@ -176,7 +194,7 @@ router.post('/import', authenticate, requireSuperAdmin, upload.single('file'), a
     console.error('Import error:', error);
     fs.rmSync(extractDir, { recursive: true, force: true });
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    res.status(500).json({ error: 'Restore failed', details: error.message });
+    res.status(500).json({ error: 'Restore failed' });
   }
 });
 
