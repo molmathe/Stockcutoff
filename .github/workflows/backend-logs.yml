@@ -24,6 +24,16 @@ jobs:
       - uat
       - stockcutoff
     steps:
+      - name: Show what is actually running
+        run: |
+          set -euo pipefail
+          echo "=== running image ==="
+          docker inspect stockcutoff-backend --format '{{.Config.Image}}' || true
+          echo "=== started at ==="
+          docker inspect stockcutoff-backend --format '{{.State.StartedAt}}' || true
+          echo "=== IMAGE_TAG the deploy bundle points at ==="
+          grep '^IMAGE_TAG=' /opt/stockcutoff-uat/.env || echo '(not set)'
+
       - name: Show matching backend log lines
         env:
           PATTERN: ${{ inputs.pattern }}
