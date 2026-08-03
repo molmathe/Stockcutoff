@@ -1,0 +1,34 @@
+name: Read backend logs
+
+# Manual, read-only diagnostics. The deployment host is a self-hosted runner with
+# no other shell access from outside, so this is the way to inspect what the
+# running backend is actually seeing.
+on:
+  workflow_dispatch:
+    inputs:
+      pattern:
+        description: 'grep pattern to filter log lines'
+        required: true
+        default: 'client-ip'
+      lines:
+        description: 'how many recent log lines to search'
+        required: false
+        default: '500'
+
+jobs:
+  logs:
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - uat
+      - stockcutoff
+    steps:
+      - name: Show matching backend log lines
+        env:
+          PATTERN: ${{ inputs.pattern }}
+          LINES: ${{ inputs.lines }}
+        run: |
+          set -euo pipefail
+          echo "=== matches for '$PATTERN' in the last $LINES lines ==="
+          docker logs stockcutoff-backend --tail "$LINES" 2>&1 | grep -F -- "$PATTERN" | tail -40 || echo "(no matching lines)"
