@@ -15,6 +15,7 @@ const isPrivateAddress = (ip: string): boolean => {
 };
 
 let warned = false;
+let probed = false;
 
 /**
  * The caller's real address, or null when only an internal hop is visible.
@@ -29,6 +30,20 @@ let warned = false;
  * value would collapse every client into one rate-limit bucket.
  */
 export const clientIp = (req: Request): string | null => {
+  // TEMPORARY: two attempts at configuring this were deployed on reasoning alone
+  // and both were wrong, so record what the forwarding chain actually looks like.
+  // Remove once `trust proxy` is set from the value observed here.
+  if (!probed) {
+    probed = true;
+    console.warn(
+      '[client-ip probe] req.ip=%s | x-forwarded-for=%s | cf-connecting-ip=%s | socket=%s',
+      req.ip,
+      req.headers['x-forwarded-for'] ?? '(none)',
+      req.headers['cf-connecting-ip'] ?? '(none)',
+      req.socket?.remoteAddress ?? '(none)',
+    );
+  }
+
   const cf = req.headers['cf-connecting-ip'];
   if (typeof cf === 'string' && cf.trim()) return cf.trim();
 
