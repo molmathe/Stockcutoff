@@ -7,7 +7,11 @@ import fs from 'fs';
 import path from 'path';
 
 const router = express.Router();
-const upload = multer({ dest: 'uploads/temp/' });
+// Every other upload in this codebase is bounded (deptReconcile 20 MB, branches
+// 5 MB); this one accepted any size and wrote it straight to disk. nginx caps
+// request bodies at 50 MB (client_max_body_size), so that is the real ceiling
+// today — this stops the backend being the unbounded part if that ever changes.
+const upload = multer({ dest: 'uploads/temp/', limits: { fileSize: 200 * 1024 * 1024 } });
 
 /**
  * GET /api/database/export
@@ -150,7 +154,11 @@ router.post('/import', authenticate, requireSuperAdmin, upload.single('file'), a
     const pgArgs = ['-h', url.hostname, '-p', url.port || '5432', '-U', decodeURIComponent(url.username), '-d', url.pathname.slice(1)];
 
     await new Promise<void>((resolve, reject) => {
-      const psql = spawn('psql', pgArgs, { env: pgEnv });
+      // Without ON_ERROR_STOP psql works through the whole file and exits 0 even
+      // when every statement failed, so a restore that did nothing reported
+      // success. Restoring onto a database that still has its tables does exactly
+      // that.
+      const psql = spawn('psql', [...pgArgs, '-v', 'ON_ERROR_STOP=1'], { env: pgEnv });
       fs.createReadStream(sqlPath).pipe(psql.stdin);
       let stderr = '';
       psql.stderr.on('data', (d) => { stderr += d.toString(); });
@@ -168,7 +176,12 @@ router.post('/import', authenticate, requireSuperAdmin, upload.single('file'), a
         if (file === 'temp') continue;
         const src = path.join(extractedUploads, file);
         const dest = path.join('/app/uploads', file);
-        if (fs.statSync(src).isFile()) {
+        // lstat, not stat: stat follows symlinks, so an archive member such as
+        // uploads/x -> /app/.env passed the name check above, looked like a file
+        // here, and had its target copied into /app/uploads — which index.ts
+        // serves publicly and unauthenticated. lstat reports the link itself, so
+        // it is not a file and gets skipped.
+        if (fs.lstatSync(src).isFile()) {
           fs.copyFileSync(src, dest);
         }
       }
