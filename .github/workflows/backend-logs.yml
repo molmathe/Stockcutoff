@@ -34,6 +34,20 @@ jobs:
           echo "=== IMAGE_TAG the deploy bundle points at ==="
           grep '^IMAGE_TAG=' /opt/stockcutoff-uat/.env || echo '(not set)'
 
+      - name: Show proxy routing state
+        run: |
+          set -euo pipefail
+          echo "=== containers on this host ==="
+          docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}'
+          echo "=== server blocks in the deployed nginx.conf ==="
+          grep -n 'server_name\|server {\|proxy_pass' /opt/stockcutoff-uat/nginx/nginx.conf || true
+          echo "=== does it mention checkin or timesheet? ==="
+          grep -n 'checkin\|timesheet\|8787' /opt/stockcutoff-uat/nginx/nginx.conf || echo '(no reference)'
+          echo "=== nginx.conf last modified ==="
+          stat -c '%y' /opt/stockcutoff-uat/nginx/nginx.conf || true
+          echo "=== proxy_network members ==="
+          docker network inspect proxy_network --format '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null || echo '(no proxy_network)'
+
       - name: Show matching backend log lines
         env:
           PATTERN: ${{ inputs.pattern }}
